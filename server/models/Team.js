@@ -1,16 +1,16 @@
 // @flow
-import uuid from "uuid";
-import { URL } from "url";
 import fs from "fs";
-import util from "util";
 import path from "path";
-import { DataTypes, sequelize, Op } from "../sequelize";
-import { publicS3Endpoint, uploadToS3FromUrl } from "../utils/s3";
+import { URL } from "url";
+import util from "util";
+import uuid from "uuid";
 import {
   stripSubdomain,
   RESERVED_SUBDOMAINS,
 } from "../../shared/utils/domains";
 import { ValidationError } from "../errors";
+import { DataTypes, sequelize, Op } from "../sequelize";
+import { publicS3Endpoint, uploadToS3FromUrl } from "../utils/s3";
 
 import Collection from "./Collection";
 import Document from "./Document";
@@ -80,7 +80,7 @@ const Team = sequelize.define(
   }
 );
 
-Team.associate = models => {
+Team.associate = (models) => {
   Team.hasMany(models.Collection, { as: "collections" });
   Team.hasMany(models.Document, { as: "documents" });
   Team.hasMany(models.User, { as: "users" });
@@ -158,7 +158,7 @@ Team.prototype.getAuth = function(service:string){
   return false;
 };
 
-const uploadAvatar = async model => {
+const uploadAvatar = async (model) => {
   const endpoint = publicS3Endpoint();
   const { avatarUrl } = model;
 
@@ -181,7 +181,7 @@ const uploadAvatar = async model => {
   }
 };
 
-Team.prototype.provisionSubdomain = async function(subdomain) {
+Team.prototype.provisionSubdomain = async function (subdomain) {
   if (this.subdomain) return this.subdomain;
 
   let append = 0;
@@ -198,12 +198,11 @@ Team.prototype.provisionSubdomain = async function(subdomain) {
   return subdomain;
 };
 
-Team.prototype.provisionFirstCollection = async function(userId) {
+Team.prototype.provisionFirstCollection = async function (userId) {
   const collection = await Collection.create({
     name: "Welcome",
     description:
       "This collection is a quick guide to what Outline is all about. Feel free to delete this collection once your team is up to speed with the basics!",
-    type: "atlas",
     teamId: this.id,
     creatorId: userId,
   });
@@ -211,10 +210,10 @@ Team.prototype.provisionFirstCollection = async function(userId) {
   // For the first collection we go ahead and create some intitial documents to get
   // the team started. You can edit these in /server/onboarding/x.md
   const onboardingDocs = [
-    "❤️ Support",
-    "🚀 Integrations & API",
-    "📝 Our Editor",
-    "👋 What is Outline",
+    "Support",
+    "Integrations & API",
+    "Our Editor",
+    "What is Outline",
   ];
   for (const title of onboardingDocs) {
     const text = await readFile(
@@ -237,11 +236,11 @@ Team.prototype.provisionFirstCollection = async function(userId) {
   }
 };
 
-Team.prototype.addAdmin = async function(user: User) {
+Team.prototype.addAdmin = async function (user: User) {
   return user.update({ isAdmin: true });
 };
 
-Team.prototype.removeAdmin = async function(user: User) {
+Team.prototype.removeAdmin = async function (user: User) {
   const res = await User.findAndCountAll({
     where: {
       teamId: this.id,
@@ -259,7 +258,7 @@ Team.prototype.removeAdmin = async function(user: User) {
   }
 };
 
-Team.prototype.suspendUser = async function(user: User, admin: User) {
+Team.prototype.suspendUser = async function (user: User, admin: User) {
   if (user.id === admin.id)
     throw new ValidationError("Unable to suspend the current user");
   return user.update({
@@ -268,20 +267,20 @@ Team.prototype.suspendUser = async function(user: User, admin: User) {
   });
 };
 
-Team.prototype.activateUser = async function(user: User, admin: User) {
+Team.prototype.activateUser = async function (user: User, admin: User) {
   return user.update({
     suspendedById: null,
     suspendedAt: null,
   });
 };
 
-Team.prototype.collectionIds = async function(paranoid: boolean = true) {
+Team.prototype.collectionIds = async function (paranoid: boolean = true) {
   let models = await Collection.findAll({
     attributes: ["id", "private"],
     where: { teamId: this.id, private: false },
     paranoid,
   });
-  return models.map(c => c.id);
+  return models.map((c) => c.id);
 };
 
 Team.beforeSave(uploadAvatar);

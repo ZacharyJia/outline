@@ -1,15 +1,14 @@
 // @flow
-import { map, find, compact, uniq } from "lodash";
-import MarkdownSerializer from "slate-md-serializer";
-import randomstring from "randomstring";
-import Sequelize, { type Transaction } from "sequelize";
 import removeMarkdown from "@tommoor/remove-markdown";
-
+import { compact, find, map, uniq } from "lodash";
+import randomstring from "randomstring";
+import Sequelize, { Transaction } from "sequelize";
+import MarkdownSerializer from "slate-md-serializer";
 import isUUID from "validator/lib/isUUID";
-import { Collection, User } from "../models";
-import { DataTypes, sequelize } from "../sequelize";
 import parseTitle from "../../shared/utils/parseTitle";
 import unescape from "../../shared/utils/unescape";
+import { Collection, User } from "../models";
+import { DataTypes, sequelize } from "../sequelize";
 import slugify from "../utils/slugify";
 import Revision from "./Revision";
 
@@ -46,18 +45,18 @@ const createRevision = (doc, options = {}) => {
   );
 };
 
-const createUrlId = doc => {
+const createUrlId = (doc) => {
   return (doc.urlId = doc.urlId || randomstring.generate(10));
 };
 
-const beforeCreate = async doc => {
+const beforeCreate = async (doc) => {
   if (doc.version === undefined) {
     doc.version = DOCUMENT_VERSION;
   }
   return beforeSave(doc);
 };
 
-const beforeSave = async doc => {
+const beforeSave = async (doc) => {
   const { emoji } = parseTitle(doc.text);
 
   // emoji in the title is split out for easier display
@@ -98,6 +97,7 @@ const Document = sequelize.define(
       },
     },
     version: DataTypes.SMALLINT,
+    template: DataTypes.BOOLEAN,
     editorVersion: DataTypes.STRING,
     text: DataTypes.TEXT,
 
@@ -122,7 +122,7 @@ const Document = sequelize.define(
       afterUpdate: createRevision,
     },
     getterMethods: {
-      url: function() {
+      url: function () {
         const slugifiedTitle = slugify(this.title);
         return `/doc/${slugifiedTitle}-${this.urlId}`;
       },
@@ -132,7 +132,7 @@ const Document = sequelize.define(
 
 // Class methods
 
-Document.associate = models => {
+Document.associate = (models) => {
   Document.belongsTo(models.Collection, {
     as: "collection",
     foreignKey: "collectionId",
@@ -141,6 +141,10 @@ Document.associate = models => {
   Document.belongsTo(models.Team, {
     as: "team",
     foreignKey: "teamId",
+  });
+  Document.belongsTo(models.Document, {
+    as: "document",
+    foreignKey: "templateId",
   });
   Document.belongsTo(models.User, {
     as: "createdBy",
@@ -180,7 +184,7 @@ Document.associate = models => {
       },
     },
   });
-  Document.addScope("withCollection", userId => {
+  Document.addScope("withCollection", (userId) => {
     if (userId) {
       return {
         include: [
@@ -204,19 +208,19 @@ Document.associate = models => {
       { model: models.User, as: "updatedBy", paranoid: false },
     ],
   });
-  Document.addScope("withViews", userId => ({
+  Document.addScope("withViews", (userId) => ({
     include: [
       { model: models.View, as: "views", where: { userId }, required: false },
     ],
   }));
-  Document.addScope("withStarred", userId => ({
+  Document.addScope("withStarred", (userId) => ({
     include: [
       { model: models.Star, as: "starred", where: { userId }, required: false },
     ],
   }));
 };
 
-Document.findByPk = async function(id, options = {}) {
+Document.findByPk = async function (id, options = {}) {
   // allow default preloading of collection membership if `userId` is passed in find options
   // almost every endpoint needs the collection membership to determine policy permissions.
   const scope = this.scope("withUnpublished", {
@@ -317,7 +321,7 @@ Document.searchForTeam = async (
     ],
   });
 
-  return map(results, result => ({
+  return map(results, (result) => ({
     ranking: result.searchRanking,
     context: removeMarkdown(unescape(result.searchContext), {
       stripHTML: false,
@@ -419,7 +423,7 @@ Document.searchForUser = async (
     ],
   });
 
-  return map(results, result => ({
+  return map(results, (result) => ({
     ranking: result.searchRanking,
     context: removeMarkdown(unescape(result.searchContext), {
       stripHTML: false,
@@ -430,21 +434,29 @@ Document.searchForUser = async (
 
 // Hooks
 
-Document.addHook("beforeSave", async model => {
-  if (!model.publishedAt) return;
+Document.addHook("beforeSave", async (model) => {
+  if (!model.publishedAt || model.template) {
+    return;
+  }
 
   const collection = await Collection.findByPk(model.collectionId);
-  if (!collection || collection.type !== "atlas") return;
+  if (!collection) {
+    return;
+  }
 
   await collection.updateDocument(model);
   model.collection = collection;
 });
 
-Document.addHook("afterCreate", async model => {
-  if (!model.publishedAt) return;
+Document.addHook("afterCreate", async (model) => {
+  if (!model.publishedAt || model.template) {
+    return;
+  }
 
   const collection = await Collection.findByPk(model.collectionId);
-  if (!collection || collection.type !== "atlas") return;
+  if (!collection) {
+    return;
+  }
 
   await collection.addDocumentToStructure(model);
   model.collection = collection;
@@ -454,7 +466,7 @@ Document.addHook("afterCreate", async model => {
 
 // Instance methods
 
-Document.prototype.toMarkdown = function() {
+Document.prototype.toMarkdown = function () {
   const text = unescape(this.text);
 
   if (this.version) {
@@ -464,7 +476,7 @@ Document.prototype.toMarkdown = function() {
   return text;
 };
 
-Document.prototype.migrateVersion = function() {
+Document.prototype.migrateVersion = function () {
   let migrated = false;
 
   // migrate from document version 0 -> 1
@@ -490,15 +502,15 @@ Document.prototype.migrateVersion = function() {
 };
 
 // Note: This method marks the document and it's children as deleted
-// in the database, it does not permanantly delete them OR remove
+// in the database, it does not permanently delete them OR remove
 // from the collection structure.
-Document.prototype.deleteWithChildren = async function(options) {
+Document.prototype.deleteWithChildren = async function (options) {
   // Helper to destroy all child documents for a document
   const loopChildren = async (documentId, opts) => {
     const childDocuments = await Document.findAll({
       where: { parentDocumentId: documentId },
     });
-    childDocuments.forEach(async child => {
+    childDocuments.forEach(async (child) => {
       await loopChildren(child.id, opts);
       await child.destroy(opts);
     });
@@ -508,15 +520,15 @@ Document.prototype.deleteWithChildren = async function(options) {
   await this.destroy(options);
 };
 
-Document.prototype.archiveWithChildren = async function(userId, options) {
+Document.prototype.archiveWithChildren = async function (userId, options) {
   const archivedAt = new Date();
 
   // Helper to archive all child documents for a document
-  const archiveChildren = async parentDocumentId => {
+  const archiveChildren = async (parentDocumentId) => {
     const childDocuments = await Document.findAll({
       where: { parentDocumentId },
     });
-    childDocuments.forEach(async child => {
+    childDocuments.forEach(async (child) => {
       await archiveChildren(child.id);
 
       child.archivedAt = archivedAt;
@@ -531,12 +543,10 @@ Document.prototype.archiveWithChildren = async function(userId, options) {
   return this.save(options);
 };
 
-Document.prototype.publish = async function(options) {
+Document.prototype.publish = async function (options) {
   if (this.publishedAt) return this.save(options);
 
   const collection = await Collection.findByPk(this.collectionId);
-  if (collection.type !== "atlas") return this.save(options);
-
   await collection.addDocumentToStructure(this);
 
   this.publishedAt = new Date();
@@ -545,9 +555,21 @@ Document.prototype.publish = async function(options) {
   return this;
 };
 
+Document.prototype.unpublish = async function (options) {
+  if (!this.publishedAt) return this;
+
+  const collection = await this.getCollection();
+  await collection.removeDocumentInStructure(this);
+
+  this.publishedAt = null;
+  await this.save(options);
+
+  return this;
+};
+
 // Moves a document from being visible to the team within a collection
 // to the archived area, where it can be subsequently restored.
-Document.prototype.archive = async function(userId) {
+Document.prototype.archive = async function (userId) {
   // archive any children and remove from the document structure
   const collection = await this.getCollection();
   await collection.removeDocumentInStructure(this);
@@ -559,7 +581,7 @@ Document.prototype.archive = async function(userId) {
 };
 
 // Restore an archived document back to being visible to the team
-Document.prototype.unarchive = async function(userId) {
+Document.prototype.unarchive = async function (userId: string) {
   const collection = await this.getCollection();
 
   // check to see if the documents parent hasn't been archived also
@@ -591,30 +613,34 @@ Document.prototype.unarchive = async function(userId) {
 };
 
 // Delete a document, archived or otherwise.
-Document.prototype.delete = function(options) {
-  return sequelize.transaction(async (transaction: Transaction): Promise<*> => {
-    if (!this.archivedAt) {
-      // delete any children and remove from the document structure
-      const collection = await this.getCollection();
-      if (collection) await collection.deleteDocument(this, { transaction });
+Document.prototype.delete = function (userId: string) {
+  return sequelize.transaction(
+    async (transaction: Transaction): Promise<Document> => {
+      if (!this.archivedAt && !this.template) {
+        // delete any children and remove from the document structure
+        const collection = await this.getCollection();
+        if (collection) await collection.deleteDocument(this, { transaction });
+      }
+
+      await Revision.destroy({
+        where: { documentId: this.id },
+        transaction,
+      });
+
+      this.lastModifiedById = userId;
+      this.deletedAt = new Date();
+
+      await this.save({ transaction });
+      return this;
     }
-
-    await Revision.destroy({
-      where: { documentId: this.id },
-      transaction,
-    });
-
-    await this.destroy({ transaction, ...options });
-
-    return this;
-  });
+  );
 };
 
-Document.prototype.getTimestamp = function() {
+Document.prototype.getTimestamp = function () {
   return Math.round(new Date(this.updatedAt).getTime() / 1000);
 };
 
-Document.prototype.getSummary = function() {
+Document.prototype.getSummary = function () {
   const plain = removeMarkdown(unescape(this.text), {
     stripHTML: false,
   });
@@ -628,7 +654,7 @@ Document.prototype.getSummary = function() {
   return notEmpty ? lines[1] : "";
 };
 
-Document.prototype.toJSON = function() {
+Document.prototype.toJSON = function () {
   // Warning: only use for new documents as order of children is
   // handled in the collection's documentStructure
   return {
