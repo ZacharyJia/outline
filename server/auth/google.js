@@ -1,11 +1,11 @@
 // @flow
-import Sequelize from "sequelize";
 import crypto from "crypto";
+import { OAuth2Client } from "google-auth-library";
 import Router from "koa-router";
 import { capitalize } from "lodash";
-import { OAuth2Client } from "google-auth-library";
-import { User, Team, Event } from "../models";
+import Sequelize from "sequelize";
 import auth from "../middlewares/authentication";
+import { User, Team, Event } from "../models";
 
 const Op = Sequelize.Op;
 
@@ -18,7 +18,7 @@ const client = new OAuth2Client(
 const allowedDomainsEnv = process.env.GOOGLE_ALLOWED_DOMAINS;
 
 // start the oauth process and redirect user to Google
-router.get("google", async ctx => {
+router.get("google", async (ctx) => {
   // Generate the url that will be used for the consent dialog.
   const authorizeUrl = client.generateAuthUrl({
     access_type: "offline",
@@ -32,7 +32,7 @@ router.get("google", async ctx => {
 });
 
 // signin callback from Google
-router.get("google.callback", auth({ required: false }), async ctx => {
+router.get("google.callback", auth({ required: false }), async (ctx) => {
   const { code } = ctx.request.query;
   ctx.assertPresent(code, "code is required");
   const response = await client.getToken(code);
@@ -64,56 +64,40 @@ router.get("google.callback", auth({ required: false }), async ctx => {
   hash.update(googleId);
   const hashedGoogleId = hash.digest("hex");
   const cbUrl = `https://logo.clearbit.com/${profile.data.hd}`;
-  const tileyUrl = `https://tiley.herokuapp.com/avatar/${hashedGoogleId}/${
-    teamName[0]
-  }.png`;
+  const tileyUrl = `https://tiley.herokuapp.com/avatar/${hashedGoogleId}/${teamName[0]}.png`;
   const cbResponse = await fetch(cbUrl);
   const avatarUrl = cbResponse.status === 200 ? cbUrl : tileyUrl;
 
-  const [team, isFirstUser] = await Team.findOrCreate({
-    where: {
-      googleId,
-    },
-    defaults: {
-      name: teamName,
-      avatarUrl,
-    },
-  });
-
-  try {
-    const [user, isFirstSignin] = await User.findOrCreate({
-      where: {
-        [Op.or]: [
-          {
-            service: "google",
-            serviceId: profile.data.id,
-          },
-          {
-            service: { [Op.eq]: null },
-            email: profile.data.email,
-          },
-        ],
-        teamId: team.id,
-      },
-      defaults: {
-        service: "google",
-        serviceId: profile.data.id,
-        name: profile.data.name,
-        email: profile.data.email,
-        isAdmin: isFirstUser,
-        avatarUrl: profile.data.picture,
-      },
-    });
-
-    // update the user with fresh details if they just accepted an invite
-    if (!user.serviceId || !user.service) {
-      await user.update({
-        service: "google",
-        serviceId: profile.data.id,
-        avatarUrl: profile.data.picture,
-      });
+  const [team,isFirstUser] = await Team.findOrCreateWithAuth({
+    where:{
+      name: teamName
+    },auth:{
+      name: "google",
+      serviceId: googleId
+    },defaults:{
+      avatarUrl
     }
+  });
+  
+  try {
 
+    const [user,isFirstSignin] = await User.findOrCreateWithAuth({
+      where:{
+        name: profile.data.name,
+        teamId: team.id
+      },
+      auth:{
+        name: "google",
+        serviceId: profile.data.id
+      },
+      defaults:{
+        isAdmin: isFirstUser,
+        email: profile.data.email, // Because this can be changed
+        avatarUrl: profile.data.picture
+      }
+    })
+    
+    
     // update email address if it's changed in Google
     if (!isFirstSignin && profile.data.email !== user.email) {
       await user.update({ email: profile.data.email });

@@ -2,7 +2,7 @@
 import Router from "koa-router";
 import { escapeRegExp } from "lodash";
 import { AuthenticationError, InvalidRequestError } from "../errors";
-import { Authentication, Document, User, Team, Collection } from "../models";
+import { Authentication, Document, User, Team, Collection,AuthenticationService } from "../models";
 import { presentSlackAttachment } from "../presenters";
 import * as Slack from "../slack";
 const router = new Router();
@@ -16,9 +16,11 @@ router.post("hooks.unfurl", async ctx => {
     throw new AuthenticationError("Invalid token");
   }
 
-  const user = await User.findOne({
-    where: { service: "slack", serviceId: event.user },
-  });
+  const user = await AuthenticationService.fetchUser({
+    name: "slack",
+    serviceId: event.user
+  },{});
+  
   if (!user) return;
 
   const auth = await Authentication.findOne({
@@ -62,9 +64,10 @@ router.post("hooks.interactive", async ctx => {
     throw new AuthenticationError("Invalid verification token");
   }
 
-  const team = await Team.findOne({
-    where: { slackId: data.team.id },
-  });
+  const team = await AuthenticationService.fetchTeam({
+    name: "slack",
+    serviceId: data.team.id
+  },{})
 
   if (!team) {
     ctx.body = {
@@ -123,9 +126,11 @@ router.post("hooks.slack", async ctx => {
     return;
   }
 
-  const team = await Team.findOne({
-    where: { slackId: team_id },
-  });
+  const team = await AuthenticationService.fetchTeam({
+    name: "slack",
+    serviceId: team_id
+  },{})
+
   if (!team) {
     ctx.body = {
       response_type: "ephemeral",
@@ -135,14 +140,13 @@ router.post("hooks.slack", async ctx => {
     return;
   }
 
-  const user = await User.findOne({
-    where: {
-      teamId: team.id,
-      service: "slack",
-      serviceId: user_id,
-    },
-  });
-
+  const user = await AuthenticationService.fetchUser({
+    name: "slack",
+    serviceId: user_id
+  },{
+    teamId: team.id
+  })
+  
   const options = {
     limit: 5,
   };
