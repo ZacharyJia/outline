@@ -19,10 +19,17 @@ const seed = async () => {
   const team = await Team.create({
     id: "86fde1d4-0050-428f-9f0b-0bf77f8bdf61",
     name: "Team",
-    slackId: "T2399UF2P",
-    slackData: {
-      id: "T2399UF2P",
-    },
+    authentication: [
+      {
+        name: "slack",
+        serviceId: "T2399UF2P",
+        data: {
+          id: "T2399UF2P",
+        }
+      }
+    ]
+  },{
+    include: "authentication"
   });
 
   const admin = await User.create({
@@ -32,13 +39,19 @@ const seed = async () => {
     name: "Admin User",
     teamId: team.id,
     isAdmin: true,
-    service: "slack",
-    serviceId: "U2399UF1P",
-    slackData: {
-      id: "U2399UF1P",
-      image_192: "http://example.com/avatar.png",
-    },
+    authentications:[
+      {
+        name: "slack",
+        serviceId: "U2399UF1P",
+        data: {
+          id: "U2399UF1P",
+          image_192: "http://example.com/avatar.png",
+        }
+      }
+    ],
     createdAt: new Date("2018-01-01T00:00:00.000Z"),
+  },{
+    include: "authentications"
   });
 
   const user = await User.create({
@@ -47,13 +60,19 @@ const seed = async () => {
     username: "user1",
     name: "User 1",
     teamId: team.id,
-    service: "slack",
-    serviceId: "U2399UF2P",
-    slackData: {
-      id: "U2399UF2P",
-      image_192: "http://example.com/avatar.png",
-    },
+    authentications:[
+      {
+        name: "slack",
+        serviceId: "U2399UF2P",
+        data: {
+          id: "U2399UF2P",
+          image_192: "http://example.com/avatar.png",
+        }
+      }
+    ],
     createdAt: new Date("2018-01-02T00:00:00.000Z"),
+  },{
+    include: "authentications"
   });
 
   const collection = await Collection.create({

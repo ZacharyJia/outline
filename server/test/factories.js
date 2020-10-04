@@ -10,6 +10,7 @@ import {
   Group,
   GroupUser,
   Attachment,
+  AuthenticationService
 } from "../models";
 
 let count = 0;
@@ -32,11 +33,17 @@ export async function buildShare(overrides: Object = {}) {
 
 export function buildTeam(overrides: Object = {}) {
   count++;
-
+  //create team authentication
   return Team.create({
     name: `Team ${count}`,
-    slackId: uuid.v4(),
+    authenticaton:{
+      name: "slack",
+      serviceId: uuid.v4(),
+      authenticatableType: "team"
+    } ,
     ...overrides,
+  },{
+    include: "authentication"
   });
 }
 
@@ -60,11 +67,16 @@ export async function buildUser(overrides: Object = {}) {
     email: `user${count}@example.com`,
     username: `user${count}`,
     name: `User ${count}`,
-    service: "slack",
-    serviceId: uuid.v4(),
+    authentications: {
+      name: "slack",
+      serviceId: uuid.v4(),
+      authenticatableType: "user"
+    },
     createdAt: new Date("2018-01-01T00:00:00.000Z"),
     lastActiveAt: new Date("2018-01-01T00:00:00.000Z"),
     ...overrides,
+  },{
+    include: "authentications"
   });
 }
 

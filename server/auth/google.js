@@ -68,50 +68,36 @@ router.get("google.callback", auth({ required: false }), async (ctx) => {
   const cbResponse = await fetch(cbUrl);
   const avatarUrl = cbResponse.status === 200 ? cbUrl : tileyUrl;
 
-  const [team, isFirstUser] = await Team.findOrCreate({
-    where: {
-      googleId,
-    },
-    defaults: {
-      name: teamName,
-      avatarUrl,
-    },
-  });
-
-  try {
-    const [user, isFirstSignin] = await User.findOrCreate({
-      where: {
-        [Op.or]: [
-          {
-            service: "google",
-            serviceId: profile.data.id,
-          },
-          {
-            service: { [Op.eq]: null },
-            email: profile.data.email,
-          },
-        ],
-        teamId: team.id,
-      },
-      defaults: {
-        service: "google",
-        serviceId: profile.data.id,
-        name: profile.data.name,
-        email: profile.data.email,
-        isAdmin: isFirstUser,
-        avatarUrl: profile.data.picture,
-      },
-    });
-
-    // update the user with fresh details if they just accepted an invite
-    if (!user.serviceId || !user.service) {
-      await user.update({
-        service: "google",
-        serviceId: profile.data.id,
-        avatarUrl: profile.data.picture,
-      });
+  const [team,isFirstUser] = await Team.findOrCreateWithAuth({
+    where:{
+      name: teamName
+    },auth:{
+      name: "google",
+      serviceId: googleId
+    },defaults:{
+      avatarUrl
     }
+  });
+  
+  try {
 
+    const [user,isFirstSignin] = await User.findOrCreateWithAuth({
+      where:{
+        name: profile.data.name,
+        teamId: team.id
+      },
+      auth:{
+        name: "google",
+        serviceId: profile.data.id
+      },
+      defaults:{
+        isAdmin: isFirstUser,
+        email: profile.data.email, // Because this can be changed
+        avatarUrl: profile.data.picture
+      }
+    })
+    
+    
     // update email address if it's changed in Google
     if (!isFirstSignin && profile.data.email !== user.email) {
       await user.update({ email: profile.data.email });

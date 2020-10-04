@@ -19,6 +19,7 @@ import Star from "./Star";
 import Team from "./Team";
 import User from "./User";
 import View from "./View";
+import AuthenticationService from "./AuthenticationService";
 
 const models = {
   ApiKey,
@@ -41,6 +42,7 @@ const models = {
   Team,
   User,
   View,
+  AuthenticationService,
 };
 
 // based on https://github.com/sequelize/express-example/blob/master/models/index.js
@@ -71,4 +73,5 @@ export {
   Team,
   User,
   View,
+  AuthenticationService,
 };
