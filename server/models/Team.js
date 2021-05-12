@@ -47,6 +47,8 @@ const Team = sequelize.define(
       },
       unique: true,
     },
+    slackId: { type: DataTypes.STRING, allowNull: true },
+    googleId: { type: DataTypes.STRING, allowNull: true },
     avatarUrl: { type: DataTypes.STRING, allowNull: true },
     sharing: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
     guestSignin: {
@@ -58,7 +60,8 @@ const Team = sequelize.define(
       type: DataTypes.BOOLEAN,
       allowNull: false,
       defaultValue: true,
-    }
+    },
+    slackData: DataTypes.JSONB,
   },
   {
     getterMethods: {
@@ -84,78 +87,6 @@ Team.associate = (models) => {
   Team.hasMany(models.Collection, { as: "collections" });
   Team.hasMany(models.Document, { as: "documents" });
   Team.hasMany(models.User, { as: "users" });
-  Team.hasOne(models.AuthenticationService,
-    {
-    as:"authentication",
-    foreignKey: "authenticatableId",
-    constraints: false,
-    scope: {
-      authenticatableType: "team"
-    }
-  });
-};
-
-Team.findOrCreateWithAuth = async function (opts){
-  
-  let currentTeam = await AuthenticationService.fetchTeam({
-    ...opts.auth
-  },opts.team)
-  
-  if(!currentTeam){
-    currentTeam = await Team.findOne({
-      where: { 
-        ...opts.where 
-      },
-      include: [{
-        model: AuthenticationService,
-        as: "authentications",
-        required: true
-      }]
-    });
-  }
-
-
-  let created = false;
-  let team = currentTeam;
-  let newAuthCreated = false;
-
-  if(!currentTeam){
-    
-    team = await Team.create({
-      ...opts.where,
-      ...opts.defaults,
-      authentication:{
-        ...opts.auth
-      }},{
-      include:{
-        model: AuthenticationService,
-        as: "authentication"  
-      }}
-    );
-    created = true
-
-  }else{
-    
-    if(!currentTeam.getAuth(opts.auth.name)){
-      await AuthenticationService.create({
-        ...opts.auth,
-        authenticatableType: "team",
-        authenticatableId: team.id
-      })
-      newAuthCreated = true
-      await team.reload()
-    }
-  
-  }
-  return [team,created,newAuthCreated];
-}
-
-Team.prototype.getAuth = function(service:string){
-  if(this.authentication){
-    return this.authentication.name == service?
-      this.authentication:false;
-  }
-  return false;
 };
 
 const uploadAvatar = async (model) => {
