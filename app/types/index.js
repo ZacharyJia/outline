@@ -1,6 +1,9 @@
 // @flow
 import { type Location } from "react-router-dom";
+import theme from "shared/styles/theme";
 import Document from "models/Document";
+
+export type Theme = typeof theme;
 
 export type LocationWithState = Location & {
   state: {
@@ -8,17 +11,18 @@ export type LocationWithState = Location & {
   },
 };
 
-export type Toast = {
+export type Toast = {|
   id: string,
   createdAt: string,
   message: string,
   type: "warning" | "error" | "info" | "success",
   timeout?: number,
+  reoccurring?: number,
   action?: {
     text: string,
     onClick: () => void,
   },
-};
+|};
 
 export type FetchOptions = {
   prefetch?: boolean,
@@ -27,12 +31,12 @@ export type FetchOptions = {
   force?: boolean,
 };
 
-export type NavigationNode = {
+export type NavigationNode = {|
   id: string,
   title: string,
   url: string,
   children: NavigationNode[],
-};
+|};
 
 // Pagination response in an API call
 export type Pagination = {
@@ -42,12 +46,12 @@ export type Pagination = {
 };
 
 // Pagination request params
-export type PaginationParams = {
+export type PaginationParams = {|
   limit?: number,
   offset?: number,
   sort?: string,
   direction?: "ASC" | "DESC",
-};
+|};
 
 export type SearchResult = {
   ranking: number,

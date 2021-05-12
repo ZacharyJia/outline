@@ -1,8 +1,14 @@
 // @flow
 import Router from "koa-router";
 import Sequelize from "sequelize";
+import { subtractDate } from "../../shared/utils/date";
+import documentImporter from "../commands/documentImporter";
 import documentMover from "../commands/documentMover";
-import { InvalidRequestError } from "../errors";
+import {
+  NotFoundError,
+  InvalidRequestError,
+  AuthorizationError,
+} from "../errors";
 import auth from "../middlewares/authentication";
 import {
   Backlink,
@@ -10,10 +16,12 @@ import {
   Document,
   Event,
   Revision,
+  SearchQuery,
   Share,
   Star,
   User,
   View,
+  Team,
 } from "../models";
 import policy from "../policies";
 import {
@@ -29,7 +37,7 @@ const { authorize, cannot } = policy;
 const router = new Router();
 
 router.post("documents.list", auth(), pagination(), async (ctx) => {
-  const {
+  let {
     sort = "updatedAt",
     template,
     backlinkDocumentId,
@@ -44,7 +52,12 @@ router.post("documents.list", auth(), pagination(), async (ctx) => {
 
   // always filter by the current team
   const user = ctx.state.user;
-  let where = { teamId: user.teamId };
+  let where = {
+    teamId: user.teamId,
+    archivedAt: {
+      [Op.eq]: null,
+    },
+  };
 
   if (template) {
     where = { ...where, template: true };
@@ -57,6 +70,7 @@ router.post("documents.list", auth(), pagination(), async (ctx) => {
     where = { ...where, createdById };
   }
 
+  let documentIds = [];
   // if a specific collection is passed then we need to check auth to view it
   if (collectionId) {
     ctx.assertUuid(collectionId, "collection must be a UUID");
@@ -67,6 +81,15 @@ router.post("documents.list", auth(), pagination(), async (ctx) => {
     }).findByPk(collectionId);
     authorize(user, "read", collection);
 
+    // index sort is special because it uses the order of the documents in the
+    // collection.documentStructure rather than a database column
+    if (sort === "index") {
+      documentIds = collection.documentStructure
+        .map((node) => node.id)
+        .slice(ctx.state.pagination.offset, ctx.state.pagination.limit);
+      where = { ...where, id: documentIds };
+    }
+
     // otherwise, filter by all collections the user has access to
   } else {
     const collectionIds = await user.collectionIds();
@@ -76,6 +99,12 @@ router.post("documents.list", auth(), pagination(), async (ctx) => {
   if (parentDocumentId) {
     ctx.assertUuid(parentDocumentId, "parentDocumentId must be a UUID");
     where = { ...where, parentDocumentId };
+  }
+
+  // Explicitly passing 'null' as the parentDocumentId allows listing documents
+  // that have no parent document (aka they are at the root of the collection)
+  if (parentDocumentId === null) {
+    where = { ...where, parentDocumentId: { [Op.eq]: null } };
   }
 
   if (backlinkDocumentId) {
@@ -94,19 +123,33 @@ router.post("documents.list", auth(), pagination(), async (ctx) => {
     };
   }
 
+  if (sort === "index") {
+    sort = "updatedAt";
+  }
+
   // add the users starred state to the response by default
   const starredScope = { method: ["withStarred", user.id] };
   const collectionScope = { method: ["withCollection", user.id] };
+  const viewScope = { method: ["withViews", user.id] };
   const documents = await Document.scope(
     "defaultScope",
     starredScope,
-    collectionScope
+    collectionScope,
+    viewScope
   ).findAll({
     where,
     order: [[sort, direction]],
     offset: ctx.state.pagination.offset,
     limit: ctx.state.pagination.limit,
   });
+
+  // index sort is special because it uses the order of the documents in the
+  // collection.documentStructure rather than a database column
+  if (documentIds.length) {
+    documents.sort(
+      (a, b) => documentIds.indexOf(a.id) - documentIds.indexOf(b.id)
+    );
+  }
 
   const data = await Promise.all(
     documents.map((document) => presentDocument(document))
@@ -136,10 +179,12 @@ router.post("documents.pinned", auth(), pagination(), async (ctx) => {
 
   const starredScope = { method: ["withStarred", user.id] };
   const collectionScope = { method: ["withCollection", user.id] };
+  const viewScope = { method: ["withViews", user.id] };
   const documents = await Document.scope(
     "defaultScope",
     starredScope,
-    collectionScope
+    collectionScope,
+    viewScope
   ).findAll({
     where: {
       teamId: user.teamId,
@@ -175,9 +220,11 @@ router.post("documents.archived", auth(), pagination(), async (ctx) => {
   const collectionIds = await user.collectionIds();
 
   const collectionScope = { method: ["withCollection", user.id] };
+  const viewScope = { method: ["withViews", user.id] };
   const documents = await Document.scope(
     "defaultScope",
-    collectionScope
+    collectionScope,
+    viewScope
   ).findAll({
     where: {
       teamId: user.teamId,
@@ -210,10 +257,11 @@ router.post("documents.deleted", auth(), pagination(), async (ctx) => {
   if (direction !== "ASC") direction = "DESC";
 
   const user = ctx.state.user;
-  const collectionIds = await user.collectionIds();
+  const collectionIds = await user.collectionIds({ paranoid: false });
 
   const collectionScope = { method: ["withCollection", user.id] };
-  const documents = await Document.scope(collectionScope).findAll({
+  const viewScope = { method: ["withViews", user.id] };
+  const documents = await Document.scope(collectionScope, viewScope).findAll({
     where: {
       teamId: user.teamId,
       collectionId: collectionIds,
@@ -275,7 +323,11 @@ router.post("documents.viewed", auth(), pagination(), async (ctx) => {
     limit: ctx.state.pagination.limit,
   });
 
-  const documents = views.map((view) => view.document);
+  const documents = views.map((view) => {
+    const document = view.document;
+    document.views = [view];
+    return document;
+  });
   const data = await Promise.all(
     documents.map((document) => presentDocument(document))
   );
@@ -341,22 +393,51 @@ router.post("documents.starred", auth(), pagination(), async (ctx) => {
 });
 
 router.post("documents.drafts", auth(), pagination(), async (ctx) => {
-  let { sort = "updatedAt", direction } = ctx.body;
+  let { collectionId, dateFilter, sort = "updatedAt", direction } = ctx.body;
   if (direction !== "ASC") direction = "DESC";
 
   const user = ctx.state.user;
-  const collectionIds = await user.collectionIds();
+
+  if (collectionId) {
+    ctx.assertUuid(collectionId, "collectionId must be a UUID");
+
+    const collection = await Collection.scope({
+      method: ["withMembership", user.id],
+    }).findByPk(collectionId);
+    authorize(user, "read", collection);
+  }
+
+  const collectionIds = !!collectionId
+    ? [collectionId]
+    : await user.collectionIds();
+
+  const whereConditions = {
+    userId: user.id,
+    collectionId: collectionIds,
+    publishedAt: { [Op.eq]: null },
+    updatedAt: undefined,
+  };
+
+  if (dateFilter) {
+    ctx.assertIn(
+      dateFilter,
+      ["day", "week", "month", "year"],
+      "dateFilter must be one of day,week,month,year"
+    );
+
+    whereConditions.updatedAt = {
+      [Op.gte]: subtractDate(new Date(), dateFilter),
+    };
+  } else {
+    delete whereConditions.updatedAt;
+  }
 
   const collectionScope = { method: ["withCollection", user.id] };
   const documents = await Document.scope(
     "defaultScope",
     collectionScope
   ).findAll({
-    where: {
-      userId: user.id,
-      collectionId: collectionIds,
-      publishedAt: { [Op.eq]: null },
-    },
+    where: whereConditions,
     order: [[sort, direction]],
     offset: ctx.state.pagination.offset,
     limit: ctx.state.pagination.limit,
@@ -406,12 +487,25 @@ async function loadDocument({ id, shareId, user }) {
     if (!share.published) {
       authorize(user, "read", document);
     }
+
+    const team = await Team.findByPk(document.teamId);
+    if (!team.sharing) {
+      throw new AuthorizationError();
+    }
   } else {
-    document = await Document.findByPk(
-      id,
-      user ? { userId: user.id } : undefined
-    );
-    authorize(user, "read", document);
+    document = await Document.findByPk(id, {
+      userId: user ? user.id : undefined,
+      paranoid: false,
+    });
+    if (!document) {
+      throw new NotFoundError();
+    }
+
+    if (document.deletedAt) {
+      authorize(user, "restore", document);
+    } else {
+      authorize(user, "read", document);
+    }
   }
 
   return document;
@@ -444,7 +538,7 @@ router.post("documents.export", auth({ required: false }), async (ctx) => {
 });
 
 router.post("documents.restore", auth(), async (ctx) => {
-  const { id, revisionId } = ctx.body;
+  const { id, collectionId, revisionId } = ctx.body;
   ctx.assertPresent(id, "id is required");
 
   const user = ctx.state.user;
@@ -452,6 +546,30 @@ router.post("documents.restore", auth(), async (ctx) => {
     userId: user.id,
     paranoid: false,
   });
+  if (!document) {
+    throw new NotFoundError();
+  }
+
+  // Passing collectionId allows restoring to a different collection than the
+  // document was originally within
+  if (collectionId) {
+    ctx.assertUuid(collectionId, "collectionId must be a uuid");
+    document.collectionId = collectionId;
+  }
+
+  const collection = await Collection.scope({
+    method: ["withMembership", user.id],
+  }).findByPk(document.collectionId);
+
+  // if the collectionId was provided in the request and isn't valid then it will
+  // be caught as a 403 on the authorize call below. Otherwise we're checking here
+  // that the original collection still exists and advising to pass collectionId
+  // if not.
+  if (!collectionId) {
+    ctx.assertPresent(collection, "collectionId is required");
+  }
+
+  authorize(user, "update", collection);
 
   if (document.deletedAt) {
     authorize(user, "restore", document);
@@ -513,6 +631,52 @@ router.post("documents.restore", auth(), async (ctx) => {
   };
 });
 
+router.post("documents.search_titles", auth(), pagination(), async (ctx) => {
+  const { query } = ctx.body;
+  const { offset, limit } = ctx.state.pagination;
+  const user = ctx.state.user;
+  ctx.assertPresent(query, "query is required");
+
+  const collectionIds = await user.collectionIds();
+
+  const documents = await Document.scope(
+    {
+      method: ["withViews", user.id],
+    },
+    {
+      method: ["withCollection", user.id],
+    }
+  ).findAll({
+    where: {
+      title: {
+        [Op.iLike]: `%${query}%`,
+      },
+      collectionId: collectionIds,
+      archivedAt: {
+        [Op.eq]: null,
+      },
+    },
+    order: [["updatedAt", "DESC"]],
+    include: [
+      { model: User, as: "createdBy", paranoid: false },
+      { model: User, as: "updatedBy", paranoid: false },
+    ],
+    offset,
+    limit,
+  });
+
+  const policies = presentPolicies(user, documents);
+  const data = await Promise.all(
+    documents.map((document) => presentDocument(document))
+  );
+
+  ctx.body = {
+    pagination: ctx.state.pagination,
+    data,
+    policies,
+  };
+});
+
 router.post("documents.search", auth(), pagination(), async (ctx) => {
   const {
     query,
@@ -549,7 +713,7 @@ router.post("documents.search", auth(), pagination(), async (ctx) => {
     );
   }
 
-  const results = await Document.searchForUser(user, query, {
+  const { results, totalCount } = await Document.searchForUser(user, query, {
     includeArchived: includeArchived === "true",
     includeDrafts: includeDrafts === "true",
     collaboratorIds,
@@ -566,6 +730,18 @@ router.post("documents.search", auth(), pagination(), async (ctx) => {
       return { ...result, document };
     })
   );
+
+  // When requesting subsequent pages of search results we don't want to record
+  // duplicate search query records
+  if (offset === 0) {
+    SearchQuery.create({
+      userId: user.id,
+      teamId: user.teamId,
+      source: ctx.state.authType,
+      query,
+      results: totalCount,
+    });
+  }
 
   const policies = presentPolicies(user, documents);
 
@@ -684,106 +860,28 @@ router.post("documents.unstar", auth(), async (ctx) => {
   };
 });
 
-router.post("documents.create", auth(), async (ctx) => {
-  const {
-    title = "",
-    text = "",
-    publish,
-    collectionId,
-    parentDocumentId,
-    templateId,
-    template,
-    index,
-  } = ctx.body;
-  const editorVersion = ctx.headers["x-editor-version"];
-
-  ctx.assertUuid(collectionId, "collectionId must be an uuid");
-  if (parentDocumentId) {
-    ctx.assertUuid(parentDocumentId, "parentDocumentId must be an uuid");
+router.post("documents.create", auth(), createDocumentFromContext);
+router.post("documents.import", auth(), async (ctx) => {
+  if (!ctx.is("multipart/form-data")) {
+    throw new InvalidRequestError("Request type must be multipart/form-data");
   }
 
-  if (index) ctx.assertPositiveInteger(index, "index must be an integer (>=0)");
+  const file: any = Object.values(ctx.request.files)[0];
+  ctx.assertPresent(file, "file is required");
 
   const user = ctx.state.user;
   authorize(user, "create", Document);
 
-  const collection = await Collection.scope({
-    method: ["withMembership", user.id],
-  }).findOne({
-    where: {
-      id: collectionId,
-      teamId: user.teamId,
-    },
-  });
-  authorize(user, "publish", collection);
-
-  let parentDocument;
-  if (parentDocumentId) {
-    parentDocument = await Document.findOne({
-      where: {
-        id: parentDocumentId,
-        collectionId: collection.id,
-      },
-    });
-    authorize(user, "read", parentDocument, { collection });
-  }
-
-  let templateDocument;
-  if (templateId) {
-    templateDocument = await Document.findByPk(templateId, { userId: user.id });
-    authorize(user, "read", templateDocument);
-  }
-
-  let document = await Document.create({
-    parentDocumentId,
-    editorVersion,
-    collectionId: collection.id,
-    teamId: user.teamId,
-    userId: user.id,
-    lastModifiedById: user.id,
-    createdById: user.id,
-    template,
-    templateId: templateDocument ? templateDocument.id : undefined,
-    title: templateDocument ? templateDocument.title : title,
-    text: templateDocument ? templateDocument.text : text,
-  });
-
-  await Event.create({
-    name: "documents.create",
-    documentId: document.id,
-    collectionId: document.collectionId,
-    teamId: document.teamId,
-    actorId: user.id,
-    data: { title: document.title, templateId },
+  const { text, title } = await documentImporter({
+    user,
+    file,
     ip: ctx.request.ip,
   });
 
-  if (publish) {
-    await document.publish();
+  ctx.body.text = text;
+  ctx.body.title = title;
 
-    await Event.create({
-      name: "documents.publish",
-      documentId: document.id,
-      collectionId: document.collectionId,
-      teamId: document.teamId,
-      actorId: user.id,
-      data: { title: document.title },
-      ip: ctx.request.ip,
-    });
-  }
-
-  // reload to get all of the data needed to present (user, collection etc)
-  // we need to specify publishedAt to bypass default scope that only returns
-  // published documents
-  document = await Document.findOne({
-    where: { id: document.id, publishedAt: document.publishedAt },
-  });
-  document.collection = collection;
-
-  ctx.body = {
-    data: await presentDocument(document),
-    policies: presentPolicies(user, [document]),
-  };
+  await createDocumentFromContext(ctx);
 });
 
 router.post("documents.templatize", auth(), async (ctx) => {
@@ -852,6 +950,8 @@ router.post("documents.update", auth(), async (ctx) => {
     throw new InvalidRequestError("Document has changed since last revision");
   }
 
+  const previousTitle = document.title;
+
   // Update document
   if (title) document.title = title;
   if (editorVersion) document.editorVersion = editorVersion;
@@ -870,7 +970,7 @@ router.post("documents.update", auth(), async (ctx) => {
     transaction = await sequelize.transaction();
 
     if (publish) {
-      await document.publish({ transaction });
+      await document.publish(user.id, { transaction });
     } else {
       await document.save({ autosave, transaction });
     }
@@ -908,6 +1008,21 @@ router.post("documents.update", auth(), async (ctx) => {
     });
   }
 
+  if (document.title !== previousTitle) {
+    Event.add({
+      name: "documents.title_change",
+      documentId: document.id,
+      collectionId: document.collectionId,
+      teamId: document.teamId,
+      actorId: user.id,
+      data: {
+        previousTitle,
+        title: document.title,
+      },
+      ip: ctx.request.ip,
+    });
+  }
+
   document.updatedBy = user;
   document.collection = collection;
 
@@ -937,6 +1052,11 @@ router.post("documents.move", auth(), async (ctx) => {
   const user = ctx.state.user;
   const document = await Document.findByPk(id, { userId: user.id });
   authorize(user, "move", document);
+
+  const collection = await Collection.scope({
+    method: ["withMembership", user.id],
+  }).findByPk(collectionId);
+  authorize(user, "update", collection);
 
   if (parentDocumentId) {
     const parent = await Document.findByPk(parentDocumentId, {
@@ -1027,7 +1147,7 @@ router.post("documents.unpublish", auth(), async (ctx) => {
 
   authorize(user, "unpublish", document);
 
-  await document.unpublish();
+  await document.unpublish(user.id);
 
   await Event.create({
     name: "documents.unpublish",
@@ -1044,5 +1164,108 @@ router.post("documents.unpublish", auth(), async (ctx) => {
     policies: presentPolicies(user, [document]),
   };
 });
+
+// TODO: update to actual `ctx` type
+export async function createDocumentFromContext(ctx: any) {
+  const {
+    title = "",
+    text = "",
+    publish,
+    collectionId,
+    parentDocumentId,
+    templateId,
+    template,
+    index,
+  } = ctx.body;
+  const editorVersion = ctx.headers["x-editor-version"];
+
+  ctx.assertUuid(collectionId, "collectionId must be an uuid");
+  if (parentDocumentId) {
+    ctx.assertUuid(parentDocumentId, "parentDocumentId must be an uuid");
+  }
+
+  if (index) ctx.assertPositiveInteger(index, "index must be an integer (>=0)");
+
+  const user = ctx.state.user;
+  authorize(user, "create", Document);
+
+  const collection = await Collection.scope({
+    method: ["withMembership", user.id],
+  }).findOne({
+    where: {
+      id: collectionId,
+      teamId: user.teamId,
+    },
+  });
+  authorize(user, "publish", collection);
+
+  let parentDocument;
+  if (parentDocumentId) {
+    parentDocument = await Document.findOne({
+      where: {
+        id: parentDocumentId,
+        collectionId: collection.id,
+      },
+    });
+    authorize(user, "read", parentDocument, { collection });
+  }
+
+  let templateDocument;
+  if (templateId) {
+    templateDocument = await Document.findByPk(templateId, { userId: user.id });
+    authorize(user, "read", templateDocument);
+  }
+
+  let document = await Document.create({
+    parentDocumentId,
+    editorVersion,
+    collectionId: collection.id,
+    teamId: user.teamId,
+    userId: user.id,
+    lastModifiedById: user.id,
+    createdById: user.id,
+    template,
+    templateId: templateDocument ? templateDocument.id : undefined,
+    title: templateDocument ? templateDocument.title : title,
+    text: templateDocument ? templateDocument.text : text,
+  });
+
+  await Event.create({
+    name: "documents.create",
+    documentId: document.id,
+    collectionId: document.collectionId,
+    teamId: document.teamId,
+    actorId: user.id,
+    data: { title: document.title, templateId },
+    ip: ctx.request.ip,
+  });
+
+  if (publish) {
+    await document.publish(user.id);
+
+    await Event.create({
+      name: "documents.publish",
+      documentId: document.id,
+      collectionId: document.collectionId,
+      teamId: document.teamId,
+      actorId: user.id,
+      data: { title: document.title },
+      ip: ctx.request.ip,
+    });
+  }
+
+  // reload to get all of the data needed to present (user, collection etc)
+  // we need to specify publishedAt to bypass default scope that only returns
+  // published documents
+  document = await Document.findOne({
+    where: { id: document.id, publishedAt: document.publishedAt },
+  });
+  document.collection = collection;
+
+  return (ctx.body = {
+    data: await presentDocument(document),
+    policies: presentPolicies(user, [document]),
+  });
+}
 
 export default router;

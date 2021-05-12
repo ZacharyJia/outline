@@ -1,20 +1,19 @@
 // @flow
-import { type Context } from "koa";
-import { Document, Collection, Event } from "../models";
+import { Document, Collection, User, Event } from "../models";
 import { sequelize } from "../sequelize";
 
 export default async function documentMover({
   user,
   document,
   collectionId,
-  parentDocumentId,
+  parentDocumentId = null, // convert undefined to null so parentId comparison treats them as equal
   index,
   ip,
 }: {
-  user: Context,
+  user: User,
   document: Document,
   collectionId: string,
-  parentDocumentId: string,
+  parentDocumentId?: string,
   index?: number,
   ip: string,
 }) {
@@ -29,6 +28,8 @@ export default async function documentMover({
 
     document.collectionId = collectionId;
     document.parentDocumentId = null;
+    document.lastModifiedById = user.id;
+    document.updatedBy = user;
 
     await document.save();
     result.documents.push(document);
@@ -39,13 +40,26 @@ export default async function documentMover({
       // remove from original collection
       const collection = await Collection.findByPk(document.collectionId, {
         transaction,
+        paranoid: false,
       });
-      const documentJson = await collection.removeDocumentInStructure(
-        document,
-        {
-          save: false,
-        }
-      );
+      const [
+        documentJson,
+        fromIndex,
+      ] = await collection.removeDocumentInStructure(document, {
+        save: false,
+      });
+
+      // if we're reordering from within the same parent
+      // the original and destination collection are the same,
+      // so when the initial item is removed above, the list will reduce by 1.
+      // We need to compensate for this when reordering
+      const toIndex =
+        index !== undefined &&
+        document.parentDocumentId === parentDocumentId &&
+        document.collectionId === collectionId &&
+        fromIndex < index
+          ? index - 1
+          : index;
 
       // if the collection is the same then it will get saved below, this
       // line prevents a pointless intermediate save from occurring.
@@ -54,11 +68,13 @@ export default async function documentMover({
       // add to new collection (may be the same)
       document.collectionId = collectionId;
       document.parentDocumentId = parentDocumentId;
+      document.lastModifiedById = user.id;
+      document.updatedBy = user;
 
       const newCollection: Collection = collectionChanged
         ? await Collection.findByPk(collectionId, { transaction })
         : collection;
-      await newCollection.addDocumentToStructure(document, index, {
+      await newCollection.addDocumentToStructure(document, toIndex, {
         documentJson,
       });
       result.collections.push(collection);

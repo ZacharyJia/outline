@@ -2,6 +2,7 @@
 import { darken, lighten } from "polished";
 
 const colors = {
+  transparent: "transparent",
   almostBlack: "#111319",
   lightBlack: "#2F3336",
   almostWhite: "#E6E6E6",
@@ -26,6 +27,7 @@ const colors = {
   yellow: "#FBCA04",
   warmGrey: "#EDF2F7",
 
+  searchHighlight: "#FDEA9B",
   danger: "#ff476f",
   warning: "#f08a24",
   success: "#2f3336",
@@ -45,9 +47,10 @@ const spacing = {
   padding: "1.5vw 1.875vw",
   vpadding: "1.5vw",
   hpadding: "1.875vw",
-  sidebarWidth: "280px",
-  sidebarMinWidth: "250px",
-  sidebarMaxWidth: "350px",
+  sidebarWidth: 260,
+  sidebarCollapsedWidth: 16,
+  sidebarMinWidth: 200,
+  sidebarMaxWidth: 400,
 };
 
 export const base = {
@@ -64,7 +67,8 @@ export const base = {
   selected: colors.primary,
   buttonBackground: colors.primary,
   buttonText: colors.white,
-  textHighlight: "#B3E7FF",
+  textHighlight: "#FDEA9B",
+  textHighlightForeground: colors.almostBlack,
 
   codeComment: "#6a737d",
   codePunctuation: "#5e6687",
@@ -138,6 +142,7 @@ export const light = {
 
   listItemHoverBackground: colors.warmGrey,
 
+  toolbarHoverBackground: colors.black,
   toolbarBackground: colors.lightBlack,
   toolbarInput: colors.white10,
   toolbarItem: colors.white,
@@ -159,11 +164,14 @@ export const light = {
   quote: colors.slateLight,
   codeBackground: colors.smoke,
   codeBorder: colors.smokeDark,
-  embedBorder: "#DDD #DDD #CCC",
+  embedBorder: colors.slateLight,
   horizontalRule: colors.smokeDark,
 
   noticeInfoBackground: colors.warmGrey,
   noticeInfoText: colors.almostBlack,
+
+  scrollbarBackground: colors.smoke,
+  scrollbarThumb: darken(0.15, colors.smokeDark),
 };
 
 export const dark = {
@@ -178,7 +186,7 @@ export const dark = {
   placeholder: colors.slateDark,
 
   sidebarBackground: colors.veryDarkBlue,
-  sidebarItemBackground: colors.veryDarkBlue,
+  sidebarItemBackground: colors.transparent,
   sidebarText: colors.slate,
   shadow: "rgba(0, 0, 0, 0.6)",
 
@@ -192,6 +200,7 @@ export const dark = {
 
   listItemHoverBackground: colors.black50,
 
+  toolbarHoverBackground: colors.slate,
   toolbarBackground: colors.white,
   toolbarInput: colors.black10,
   toolbarItem: colors.lightBlack,
@@ -219,6 +228,9 @@ export const dark = {
 
   noticeInfoBackground: colors.white10,
   noticeInfoText: colors.almostWhite,
+
+  scrollbarBackground: colors.black,
+  scrollbarThumb: colors.lightBlack,
 };
 
 export default light;

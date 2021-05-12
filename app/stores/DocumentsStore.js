@@ -1,30 +1,33 @@
 // @flow
 import invariant from "invariant";
-import {
-  without,
-  map,
-  find,
-  orderBy,
-  filter,
-  compact,
-  omitBy,
-  uniq,
-} from "lodash";
+import { find, orderBy, filter, compact, omitBy } from "lodash";
 import { observable, action, computed, runInAction } from "mobx";
+import { MAX_TITLE_LENGTH } from "shared/constants";
+import { subtractDate } from "shared/utils/date";
 import naturalSort from "shared/utils/naturalSort";
-
 import BaseStore from "stores/BaseStore";
 import RootStore from "stores/RootStore";
 import Document from "models/Document";
-import Revision from "models/Revision";
 import type { FetchOptions, PaginationParams, SearchResult } from "types";
 import { client } from "utils/ApiClient";
 
+type ImportOptions = {
+  publish?: boolean,
+};
+
 export default class DocumentsStore extends BaseStore<Document> {
-  @observable recentlyViewedIds: string[] = [];
   @observable searchCache: Map<string, SearchResult[]> = new Map();
   @observable starredIds: Map<string, boolean> = new Map();
   @observable backlinks: Map<string, string[]> = new Map();
+  @observable movingDocumentId: ?string;
+
+  importFileTypes: string[] = [
+    "text/markdown",
+    "text/plain",
+    "text/html",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ];
 
   constructor(rootStore: RootStore) {
     super(rootStore, Document);
@@ -41,8 +44,8 @@ export default class DocumentsStore extends BaseStore<Document> {
   @computed
   get recentlyViewed(): Document[] {
     return orderBy(
-      compact(this.recentlyViewedIds.map((id) => this.data.get(id))),
-      "updatedAt",
+      filter(this.all, (d) => d.lastViewedAt),
+      "lastViewedAt",
       "desc"
     );
   }
@@ -108,6 +111,15 @@ export default class DocumentsStore extends BaseStore<Document> {
     );
   }
 
+  rootInCollection(collectionId: string): Document[] {
+    const collection = this.rootStore.collections.get(collectionId);
+    if (!collection) {
+      return [];
+    }
+
+    return compact(collection.documents.map((node) => this.get(node.id)));
+  }
+
   leastRecentlyUpdatedInCollection(collectionId: string): Document[] {
     return orderBy(this.inCollection(collectionId), "updatedAt", "asc");
   }
@@ -167,12 +179,37 @@ export default class DocumentsStore extends BaseStore<Document> {
   }
 
   @computed
-  get drafts(): Document[] {
-    return filter(
+  get totalDrafts(): number {
+    return this.drafts().length;
+  }
+
+  drafts = (
+    options: {
+      ...PaginationParams,
+      dateFilter?: "day" | "week" | "month" | "year",
+      collectionId?: string,
+    } = {}
+  ): Document[] => {
+    let drafts = filter(
       orderBy(this.all, "updatedAt", "desc"),
       (doc) => !doc.publishedAt
     );
-  }
+
+    if (options.dateFilter) {
+      drafts = filter(
+        drafts,
+        (draft) =>
+          new Date(draft.updatedAt) >=
+          subtractDate(new Date(), options.dateFilter || "year")
+      );
+    }
+
+    if (options.collectionId) {
+      drafts = filter(drafts, { collectionId: options.collectionId });
+    }
+
+    return drafts;
+  };
 
   @computed
   get active(): ?Document {
@@ -190,6 +227,7 @@ export default class DocumentsStore extends BaseStore<Document> {
     const { data } = res;
     runInAction("DocumentsStore#fetchBacklinks", () => {
       data.forEach(this.add);
+      this.addPolicies(res.policies);
       this.backlinks.set(
         documentId,
         data.map((doc) => doc.id)
@@ -215,13 +253,14 @@ export default class DocumentsStore extends BaseStore<Document> {
     const { data } = res;
     runInAction("DocumentsStore#fetchChildDocuments", () => {
       data.forEach(this.add);
+      this.addPolicies(res.policies);
     });
   };
 
   @action
   fetchNamedPage = async (
     request: string = "list",
-    options: ?PaginationParams
+    options: ?Object
   ): Promise<?(Document[])> => {
     this.isFetching = true;
 
@@ -290,15 +329,7 @@ export default class DocumentsStore extends BaseStore<Document> {
 
   @action
   fetchRecentlyViewed = async (options: ?PaginationParams): Promise<*> => {
-    const data = await this.fetchNamedPage("viewed", options);
-
-    runInAction("DocumentsStore#fetchRecentlyViewed", () => {
-      // $FlowFixMe
-      this.recentlyViewedIds.replace(
-        uniq(this.recentlyViewedIds.concat(map(data, "id")))
-      );
-    });
-    return data;
+    return this.fetchNamedPage("viewed", options);
   };
 
   @action
@@ -322,11 +353,31 @@ export default class DocumentsStore extends BaseStore<Document> {
   };
 
   @action
+  searchTitles = async (query: string) => {
+    const res = await client.get("/documents.search_titles", {
+      query,
+    });
+    invariant(res && res.data, "Search response should be available");
+
+    // add the documents and associated policies to the store
+    res.data.forEach(this.add);
+    this.addPolicies(res.policies);
+    return res.data;
+  };
+
+  @action
   search = async (
     query: string,
-    options: PaginationParams = {}
+    options: {
+      offset?: number,
+      limit?: number,
+      dateFilter?: "day" | "week" | "month" | "year",
+      includeArchived?: boolean,
+      includeDrafts?: boolean,
+      collectionId?: string,
+      userId?: string,
+    }
   ): Promise<SearchResult[]> => {
-    // $FlowFixMe
     const compactedOptions = omitBy(options, (o) => !o);
     const res = await client.get("/documents.search", {
       ...compactedOptions,
@@ -390,7 +441,7 @@ export default class DocumentsStore extends BaseStore<Document> {
   @action
   fetch = async (
     id: string,
-    options?: FetchOptions = {}
+    options: FetchOptions = {}
   ): Promise<?Document> => {
     if (!options.prefetch) this.isFetching = true;
 
@@ -422,35 +473,84 @@ export default class DocumentsStore extends BaseStore<Document> {
 
   @action
   move = async (
-    document: Document,
+    documentId: string,
     collectionId: string,
-    parentDocumentId: ?string
+    parentDocumentId: ?string,
+    index: ?number
   ) => {
-    const res = await client.post("/documents.move", {
-      id: document.id,
-      collectionId,
-      parentDocumentId,
-    });
-    invariant(res && res.data, "Data not available");
+    this.movingDocumentId = documentId;
 
-    res.data.documents.forEach(this.add);
-    res.data.collections.forEach(this.rootStore.collections.add);
+    try {
+      const res = await client.post("/documents.move", {
+        id: documentId,
+        collectionId,
+        parentDocumentId,
+        index: index,
+      });
+      invariant(res && res.data, "Data not available");
+
+      res.data.documents.forEach(this.add);
+      res.data.collections.forEach(this.rootStore.collections.add);
+      this.addPolicies(res.policies);
+    } finally {
+      this.movingDocumentId = undefined;
+    }
   };
 
   @action
   duplicate = async (document: Document): * => {
+    const append = " (duplicate)";
+
     const res = await client.post("/documents.create", {
       publish: !!document.publishedAt,
       parentDocumentId: document.parentDocumentId,
       collectionId: document.collectionId,
       template: document.template,
-      title: `${document.title} (duplicate)`,
+      title: `${document.title.slice(
+        0,
+        MAX_TITLE_LENGTH - append.length
+      )}${append}`,
       text: document.text,
     });
     invariant(res && res.data, "Data should be available");
 
     const collection = this.getCollectionForDocument(document);
     if (collection) collection.refresh();
+
+    this.addPolicies(res.policies);
+    return this.add(res.data);
+  };
+
+  @action
+  import = async (
+    file: File,
+    parentDocumentId: string,
+    collectionId: string,
+    options: ImportOptions
+  ) => {
+    const title = file.name.replace(/\.[^/.]+$/, "");
+    const formData = new FormData();
+
+    [
+      { key: "parentDocumentId", value: parentDocumentId },
+      { key: "collectionId", value: collectionId },
+      { key: "title", value: title },
+      { key: "publish", value: options.publish },
+      { key: "file", value: file },
+    ].forEach((info) => {
+      if (typeof info.value === "string" && info.value) {
+        formData.append(info.key, info.value);
+      }
+      if (typeof info.value === "boolean") {
+        formData.append(info.key, info.value.toString());
+      }
+      if (info.value instanceof File) {
+        formData.append(info.key, info.value);
+      }
+    });
+
+    const res = await client.post("/documents.import", formData);
+    invariant(res && res.data, "Data should be available");
 
     this.addPolicies(res.policies);
     return this.add(res.data);
@@ -496,10 +596,6 @@ export default class DocumentsStore extends BaseStore<Document> {
   async delete(document: Document) {
     await super.delete(document);
 
-    runInAction(() => {
-      this.recentlyViewedIds = without(this.recentlyViewedIds, document.id);
-    });
-
     // check to see if we have any shares related to this document already
     // loaded in local state. If so we can go ahead and remove those too.
     const share = this.rootStore.shares.getByDocumentId(document.id);
@@ -527,10 +623,14 @@ export default class DocumentsStore extends BaseStore<Document> {
   };
 
   @action
-  restore = async (document: Document, revision?: Revision) => {
+  restore = async (
+    document: Document,
+    options: { revisionId?: string, collectionId?: string } = {}
+  ) => {
     const res = await client.post("/documents.restore", {
       id: document.id,
-      revisionId: revision ? revision.id : undefined,
+      revisionId: options.revisionId,
+      collectionId: options.collectionId,
     });
     runInAction("Document#restore", () => {
       invariant(res && res.data, "Data should be available");

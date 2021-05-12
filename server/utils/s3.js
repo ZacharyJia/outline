@@ -16,7 +16,7 @@ const s3 = new AWS.S3({
   s3ForcePathStyle: AWS_S3_FORCE_PATH_STYLE,
   accessKeyId: AWS_ACCESS_KEY_ID,
   secretAccessKey: AWS_SECRET_ACCESS_KEY,
-  endpoint: new AWS.Endpoint(process.env.AWS_S3_UPLOAD_BUCKET_URL),
+  region: AWS_REGION,
   signatureVersion: "v4",
 });
 
@@ -59,7 +59,7 @@ export const makePolicy = (
     expiration: format(tomorrow, "YYYY-MM-DDTHH:mm:ss\\Z"),
   };
 
-  return new Buffer(JSON.stringify(policy)).toString("base64");
+  return Buffer.from(JSON.stringify(policy)).toString("base64");
 };
 
 export const getSignature = (policy: any) => {
@@ -84,9 +84,39 @@ export const publicS3Endpoint = (isServerUpload?: boolean) => {
     "localhost:"
   ).replace(/\/$/, "");
 
+  // support old path-style S3 uploads and new virtual host uploads by checking
+  // for the bucket name in the endpoint url before appending.
+  const isVirtualHost = host.includes(AWS_S3_UPLOAD_BUCKET_NAME);
+
+  if (isVirtualHost) {
+    return host;
+  }
+
   return `${host}/${
     isServerUpload && isDocker ? "s3/" : ""
   }${AWS_S3_UPLOAD_BUCKET_NAME}`;
+};
+
+export const uploadToS3FromBuffer = async (
+  buffer: Buffer,
+  contentType: string,
+  key: string,
+  acl: string
+) => {
+  await s3
+    .putObject({
+      ACL: acl,
+      Bucket: AWS_S3_UPLOAD_BUCKET_NAME,
+      Key: key,
+      ContentType: contentType,
+      ContentLength: buffer.length,
+      ServerSideEncryption: "AES256",
+      Body: buffer,
+    })
+    .promise();
+
+  const endpoint = publicS3Endpoint(true);
+  return `${endpoint}/${key}`;
 };
 
 export const uploadToS3FromUrl = async (

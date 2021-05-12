@@ -5,10 +5,12 @@ import stores from "stores";
 import download from "./download";
 import {
   AuthorizationError,
+  BadRequestError,
   NetworkError,
   NotFoundError,
   OfflineError,
   RequestError,
+  ServiceUnavailableError,
   UpdateRequiredError,
 } from "./errors";
 
@@ -28,12 +30,13 @@ class ApiClient {
   fetch = async (
     path: string,
     method: string,
-    data: ?Object,
+    data: ?Object | FormData | void,
     options: Object = {}
   ) => {
     let body;
     let modifiedPath;
     let urlToFetch;
+    let isJson;
 
     if (method === "GET") {
       if (data) {
@@ -42,7 +45,18 @@ class ApiClient {
         modifiedPath = path;
       }
     } else if (method === "POST" || method === "PUT") {
-      body = data ? JSON.stringify(data) : undefined;
+      body = data || undefined;
+
+      // Only stringify data if its a normal object and
+      // not if it's [object FormData], in addition to
+      // toggling Content-Type to application/json
+      if (
+        typeof data === "object" &&
+        (data || "").toString() === "[object Object]"
+      ) {
+        isJson = true;
+        body = JSON.stringify(data);
+      }
     }
 
     if (path.match(/^http/)) {
@@ -51,14 +65,20 @@ class ApiClient {
       urlToFetch = this.baseUrl + (modifiedPath || path);
     }
 
-    // Construct headers
-    const headers = new Headers({
+    let headerOptions: any = {
       Accept: "application/json",
-      "Content-Type": "application/json",
       "cache-control": "no-cache",
       "x-editor-version": EDITOR_VERSION,
       pragma: "no-cache",
-    });
+    };
+    // for multipart forms or other non JSON requests fetch
+    // populates the Content-Type without needing to explicitly
+    // set it.
+    if (isJson) {
+      headerOptions["Content-Type"] = "application/json";
+    }
+    const headers = new Headers(headerOptions);
+
     if (stores.auth.authenticated) {
       invariant(stores.auth.token, "JWT token not set properly");
       headers.set("Authorization", `Bearer ${stores.auth.token}`);
@@ -92,6 +112,8 @@ class ApiClient {
 
       download(blob, trim(fileName, '"'));
       return;
+    } else if (success && response.status === 204) {
+      return;
     } else if (success) {
       return response.json();
     }
@@ -121,12 +143,20 @@ class ApiClient {
       throw new UpdateRequiredError(error.message);
     }
 
+    if (response.status === 400) {
+      throw new BadRequestError(error.message);
+    }
+
     if (response.status === 403) {
       throw new AuthorizationError(error.message);
     }
 
     if (response.status === 404) {
       throw new NotFoundError(error.message);
+    }
+
+    if (response.status === 503) {
+      throw new ServiceUnavailableError(error.message);
     }
 
     throw new RequestError(error.message);

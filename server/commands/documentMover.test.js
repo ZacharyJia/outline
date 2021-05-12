@@ -1,7 +1,7 @@
 /* eslint-disable flowtype/require-valid-file-annotation */
-import documentMover from "../commands/documentMover";
 import { buildDocument, buildCollection } from "../test/factories";
 import { flushdb, seed } from "../test/support";
+import documentMover from "./documentMover";
 
 beforeEach(() => flushdb());
 
@@ -28,7 +28,7 @@ describe("documentMover", () => {
       parentDocumentId: document.id,
       collectionId: collection.id,
       teamId: collection.teamId,
-      userId: collection.creatorId,
+      userId: collection.createdById,
       title: "Child document",
       text: "content",
     });
@@ -59,7 +59,7 @@ describe("documentMover", () => {
       parentDocumentId: document.id,
       collectionId: collection.id,
       teamId: collection.teamId,
-      userId: collection.creatorId,
+      userId: collection.createdById,
       title: "Child document",
       text: "content",
     });

@@ -1,12 +1,13 @@
 // @flow
 import ArrowKeyNavigation from "boundless-arrow-key-navigation";
-import { debounce } from "lodash";
+import { debounce, isEqual } from "lodash";
 import { observable, action } from "mobx";
 import { observer, inject } from "mobx-react";
 import { PlusIcon } from "outline-icons";
 import queryString from "query-string";
 import * as React from "react";
 import ReactDOM from "react-dom";
+import { withTranslation, Trans, type TFunction } from "react-i18next";
 import keydown from "react-keydown";
 import { withRouter, Link } from "react-router-dom";
 import type { RouterHistory, Match } from "react-router-dom";
@@ -20,7 +21,7 @@ import UsersStore from "stores/UsersStore";
 
 import Button from "components/Button";
 import CenteredContent from "components/CenteredContent";
-import DocumentPreview from "components/DocumentPreview";
+import DocumentListItem from "components/DocumentListItem";
 import Empty from "components/Empty";
 import Fade from "components/Fade";
 import Flex from "components/Flex";
@@ -34,7 +35,7 @@ import StatusFilter from "./components/StatusFilter";
 import UserFilter from "./components/UserFilter";
 import NewDocumentMenu from "menus/NewDocumentMenu";
 import { type LocationWithState } from "types";
-import { meta } from "utils/keyboard";
+import { metaDisplay } from "utils/keyboard";
 import { newDocumentUrl, searchUrl } from "utils/routeHelpers";
 
 type Props = {
@@ -44,18 +45,21 @@ type Props = {
   documents: DocumentsStore,
   users: UsersStore,
   notFound: ?boolean,
+  t: TFunction,
 };
 
 @observer
 class Search extends React.Component<Props> {
-  firstDocument: ?React.Component<typeof DocumentPreview>;
+  firstDocument: ?React.Component<any>;
+  lastQuery: string = "";
+  lastParams: Object;
 
   @observable
   query: string = decodeURIComponent(this.props.match.params.term || "");
   @observable params: URLSearchParams = new URLSearchParams();
   @observable offset: number = 0;
   @observable allowLoadMore: boolean = true;
-  @observable isFetching: boolean = false;
+  @observable isLoading: boolean = false;
   @observable pinToTop: boolean = !!this.props.match.params.term;
 
   componentDidMount() {
@@ -66,7 +70,7 @@ class Search extends React.Component<Props> {
     }
   }
 
-  componentDidUpdate(prevProps) {
+  componentDidUpdate(prevProps: Props) {
     if (prevProps.location.search !== this.props.location.search) {
       this.handleQueryChange();
     }
@@ -80,15 +84,18 @@ class Search extends React.Component<Props> {
     this.props.history.goBack();
   }
 
-  handleKeyDown = (ev) => {
-    // Escape
-    if (ev.which === 27) {
-      ev.preventDefault();
-      this.goBack();
+  handleKeyDown = (ev: SyntheticKeyboardEvent<>) => {
+    if (ev.key === "Enter") {
+      this.fetchResults();
+      return;
     }
 
-    // Down
-    if (ev.which === 40) {
+    if (ev.key === "Escape") {
+      ev.preventDefault();
+      return this.goBack();
+    }
+
+    if (ev.key === "ArrowDown") {
       ev.preventDefault();
       if (this.firstDocument) {
         const element = ReactDOM.findDOMNode(this.firstDocument);
@@ -103,7 +110,7 @@ class Search extends React.Component<Props> {
     this.allowLoadMore = true;
 
     // To prevent "no results" showing before debounce kicks in
-    this.isFetching = true;
+    this.isLoading = true;
 
     this.fetchResultsDebounced();
   };
@@ -115,12 +122,17 @@ class Search extends React.Component<Props> {
     this.allowLoadMore = true;
 
     // To prevent "no results" showing before debounce kicks in
-    this.isFetching = !!this.query;
+    this.isLoading = !!this.query;
 
     this.fetchResultsDebounced();
   };
 
-  handleFilterChange = (search) => {
+  handleFilterChange = (search: {
+    collectionId?: ?string,
+    userId?: ?string,
+    dateFilter?: ?string,
+    includeArchived?: ?string,
+  }) => {
     this.props.history.replace({
       pathname: this.props.location.pathname,
       search: queryString.stringify({
@@ -166,7 +178,7 @@ class Search extends React.Component<Props> {
 
   get title() {
     const query = this.query;
-    const title = "Search";
+    const title = this.props.t("Search");
     if (query) return `${query} – ${title}`;
     return title;
   }
@@ -174,7 +186,7 @@ class Search extends React.Component<Props> {
   @action
   loadMoreResults = async () => {
     // Don't paginate if there aren't more results or we’re in the middle of fetching
-    if (!this.allowLoadMore || this.isFetching) return;
+    if (!this.allowLoadMore || this.isLoading) return;
 
     // Fetch more results
     await this.fetchResults();
@@ -183,18 +195,28 @@ class Search extends React.Component<Props> {
   @action
   fetchResults = async () => {
     if (this.query) {
-      this.isFetching = true;
+      const params = {
+        offset: this.offset,
+        limit: DEFAULT_PAGINATION_LIMIT,
+        dateFilter: this.dateFilter,
+        includeArchived: this.includeArchived,
+        includeDrafts: true,
+        collectionId: this.collectionId,
+        userId: this.userId,
+      };
+
+      // we just requested this thing – no need to try again
+      if (this.lastQuery === this.query && isEqual(params, this.lastParams)) {
+        this.isLoading = false;
+        return;
+      }
+
+      this.isLoading = true;
+      this.lastQuery = this.query;
+      this.lastParams = params;
 
       try {
-        const results = await this.props.documents.search(this.query, {
-          offset: this.offset,
-          limit: DEFAULT_PAGINATION_LIMIT,
-          dateFilter: this.dateFilter,
-          includeArchived: this.includeArchived,
-          includeDrafts: true,
-          collectionId: this.collectionId,
-          userId: this.userId,
-        });
+        const results = await this.props.documents.search(this.query, params);
 
         this.pinToTop = true;
 
@@ -203,50 +225,56 @@ class Search extends React.Component<Props> {
         } else {
           this.offset += DEFAULT_PAGINATION_LIMIT;
         }
+      } catch (err) {
+        this.lastQuery = "";
+        throw err;
       } finally {
-        this.isFetching = false;
+        this.isLoading = false;
       }
     } else {
       this.pinToTop = false;
+      this.lastQuery = this.query;
     }
   };
 
-  fetchResultsDebounced = debounce(this.fetchResults, 350, {
+  fetchResultsDebounced = debounce(this.fetchResults, 500, {
     leading: false,
     trailing: true,
   });
 
-  updateLocation = (query) => {
+  updateLocation = (query: string) => {
     this.props.history.replace({
       pathname: searchUrl(query),
       search: this.props.location.search,
     });
   };
 
-  setFirstDocumentRef = (ref) => {
-    // $FlowFixMe
+  setFirstDocumentRef = (ref: any) => {
     this.firstDocument = ref;
   };
 
   render() {
-    const { documents, notFound, location } = this.props;
+    const { documents, notFound, location, t } = this.props;
     const results = documents.searchResults(this.query);
-    const showEmpty = !this.isFetching && this.query && results.length === 0;
+    const showEmpty = !this.isLoading && this.query && results.length === 0;
     const showShortcutTip =
       !this.pinToTop && location.state && location.state.fromMenu;
 
     return (
       <Container auto>
         <PageTitle title={this.title} />
-        {this.isFetching && <LoadingIndicator />}
+        {this.isLoading && <LoadingIndicator />}
         {notFound && (
           <div>
-            <h1>Not Found</h1>
-            <Empty>We were unable to find the page you’re looking for.</Empty>
+            <h1>{t("Not Found")}</h1>
+            <Empty>
+              {t("We were unable to find the page you’re looking for.")}
+            </Empty>
           </div>
         )}
         <ResultsWrapper pinToTop={this.pinToTop} column auto>
           <SearchField
+            placeholder={`${t("Search")}…`}
             onKeyDown={this.handleKeyDown}
             onChange={this.updateLocation}
             defaultValue={this.query}
@@ -254,8 +282,11 @@ class Search extends React.Component<Props> {
           {showShortcutTip && (
             <Fade>
               <HelpText small>
-                Use the <strong>{meta}+K</strong> shortcut to search from
-                anywhere in Outline
+                <Trans
+                  defaults="Use the <em>{{ meta }}+K</em> shortcut to search from anywhere in your knowledge base"
+                  values={{ meta: metaDisplay }}
+                  components={{ em: <strong /> }}
+                />
               </HelpText>
             </Fade>
           )}
@@ -287,31 +318,31 @@ class Search extends React.Component<Props> {
           )}
           {showEmpty && (
             <Fade>
-              <Empty>
-                <Centered column>
-                  <HelpText>
+              <Centered column>
+                <HelpText>
+                  <Trans>
                     No documents found for your search filters. <br />
                     Create a new document?
-                  </HelpText>
-                  <Wrapper>
-                    {this.collectionId ? (
-                      <Button
-                        onClick={this.handleNewDoc}
-                        icon={<PlusIcon />}
-                        primary
-                      >
-                        New doc
-                      </Button>
-                    ) : (
-                      <NewDocumentMenu />
-                    )}
-                    &nbsp;&nbsp;
-                    <Button as={Link} to="/search" neutral>
-                      Clear filters
+                  </Trans>
+                </HelpText>
+                <Wrapper>
+                  {this.collectionId ? (
+                    <Button
+                      onClick={this.handleNewDoc}
+                      icon={<PlusIcon />}
+                      primary
+                    >
+                      {t("New doc")}
                     </Button>
-                  </Wrapper>
-                </Centered>
-              </Empty>
+                  ) : (
+                    <NewDocumentMenu />
+                  )}
+                  &nbsp;&nbsp;
+                  <Button as={Link} to="/search" neutral>
+                    {t("Clear filters")}
+                  </Button>
+                </Wrapper>
+              </Centered>
             </Fade>
           )}
           <ResultList column visible={this.pinToTop}>
@@ -324,13 +355,14 @@ class Search extends React.Component<Props> {
                 if (!document) return null;
 
                 return (
-                  <DocumentPreview
+                  <DocumentListItem
                     ref={(ref) => index === 0 && this.setFirstDocumentRef(ref)}
                     key={document.id}
                     document={document}
                     highlight={this.query}
                     context={result.context}
                     showCollection
+                    showTemplate
                   />
                 );
               })}
@@ -388,7 +420,8 @@ const Filters = styled(Flex)`
   margin-bottom: 12px;
   opacity: 0.85;
   transition: opacity 100ms ease-in-out;
-  overflow-y: auto;
+  overflow-y: hidden;
+  overflow-x: auto;
   padding: 8px 0;
 
   ${breakpoint("tablet")`	
@@ -400,4 +433,6 @@ const Filters = styled(Flex)`
   }
 `;
 
-export default withRouter(inject("documents")(Search));
+export default withTranslation()<Search>(
+  withRouter(inject("documents")(Search))
+);

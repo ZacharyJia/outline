@@ -1,13 +1,14 @@
 // @flow
 import addDays from "date-fns/add_days";
+import differenceInDays from "date-fns/difference_in_days";
 import invariant from "invariant";
 import { action, computed, observable, set } from "mobx";
 import parseTitle from "shared/utils/parseTitle";
 import unescape from "shared/utils/unescape";
 import DocumentsStore from "stores/DocumentsStore";
 import BaseModel from "models/BaseModel";
-import Revision from "models/Revision";
 import User from "models/User";
+import View from "./View";
 
 type SaveOptions = {
   publish?: boolean,
@@ -20,11 +21,11 @@ export default class Document extends BaseModel {
   @observable isSaving: boolean = false;
   @observable embedsDisabled: boolean = false;
   @observable injectTemplate: boolean = false;
+  @observable lastViewedAt: ?string;
   store: DocumentsStore;
 
   collaborators: User[];
   collectionId: string;
-  lastViewedAt: ?string;
   createdAt: string;
   createdBy: User;
   updatedAt: string;
@@ -48,7 +49,7 @@ export default class Document extends BaseModel {
   constructor(fields: Object, store: DocumentsStore) {
     super(fields, store);
 
-    if (this.isNew && this.isFromTemplate) {
+    if (this.isNewDocument && this.isFromTemplate) {
       this.title = "";
     }
   }
@@ -71,6 +72,14 @@ export default class Document extends BaseModel {
   @computed
   get modifiedSinceViewed(): boolean {
     return !!this.lastViewedAt && this.lastViewedAt < this.updatedAt;
+  }
+
+  @computed
+  get isNew(): boolean {
+    return (
+      !this.lastViewedAt &&
+      differenceInDays(new Date(), new Date(this.createdAt)) < 14
+    );
   }
 
   @computed
@@ -113,7 +122,7 @@ export default class Document extends BaseModel {
   }
 
   @computed
-  get isNew(): boolean {
+  get isNewDocument(): boolean {
     return this.createdAt === this.updatedAt;
   }
 
@@ -133,7 +142,7 @@ export default class Document extends BaseModel {
   };
 
   @action
-  updateFromJson = (data) => {
+  updateFromJson = (data: Object) => {
     set(this, data);
   };
 
@@ -141,8 +150,8 @@ export default class Document extends BaseModel {
     return this.store.archive(this);
   };
 
-  restore = (revision: Revision) => {
-    return this.store.restore(this, revision);
+  restore = (options: { revisionId?: string, collectionId?: string }) => {
+    return this.store.restore(this, options);
   };
 
   unpublish = () => {
@@ -197,7 +206,17 @@ export default class Document extends BaseModel {
 
   @action
   view = () => {
+    // we don't record views for documents in the trash
+    if (this.isDeleted || !this.publishedAt) {
+      return;
+    }
+
     return this.store.rootStore.views.create({ documentId: this.id });
+  };
+
+  @action
+  updateLastViewed = (view: View) => {
+    this.lastViewedAt = view.lastViewedAt;
   };
 
   @action
@@ -214,7 +233,7 @@ export default class Document extends BaseModel {
   };
 
   @action
-  save = async (options: SaveOptions) => {
+  save = async (options: SaveOptions = {}) => {
     if (this.isSaving) return this;
 
     const isCreating = !this.id;
@@ -227,7 +246,9 @@ export default class Document extends BaseModel {
           collectionId: this.collectionId,
           title: this.title,
           text: this.text,
-          ...options,
+          publish: options.publish,
+          done: options.done,
+          autosave: options.autosave,
         });
       }
 
@@ -238,7 +259,9 @@ export default class Document extends BaseModel {
           text: this.text,
           templateId: this.templateId,
           lastRevision: options.lastRevision,
-          ...options,
+          publish: options.publish,
+          done: options.done,
+          autosave: options.autosave,
         });
       }
 
@@ -249,7 +272,7 @@ export default class Document extends BaseModel {
   };
 
   move = (collectionId: string, parentDocumentId: ?string) => {
-    return this.store.move(this, collectionId, parentDocumentId);
+    return this.store.move(this.id, collectionId, parentDocumentId);
   };
 
   duplicate = () => {

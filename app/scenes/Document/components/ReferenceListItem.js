@@ -7,11 +7,11 @@ import Document from "models/Document";
 import DocumentMeta from "components/DocumentMeta";
 import type { NavigationNode } from "types";
 
-type Props = {
+type Props = {|
   document: Document | NavigationNode,
   anchor?: string,
   showCollection?: boolean,
-};
+|};
 
 const DocumentLink = styled(Link)`
   display: block;
@@ -27,7 +27,6 @@ const DocumentLink = styled(Link)`
   &:active,
   &:focus {
     background: ${(props) => props.theme.listItemHoverBackground};
-    outline: none;
   }
 `;
 

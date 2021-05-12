@@ -1,10 +1,14 @@
 // @flow
+import distanceInWordsToNow from "date-fns/distance_in_words_to_now";
 import invariant from "invariant";
+import { deburr, sortBy } from "lodash";
 import { observable } from "mobx";
 import { observer, inject } from "mobx-react";
 import * as React from "react";
 import type { RouterHistory, Match } from "react-router-dom";
 import { withRouter } from "react-router-dom";
+import { withTheme } from "styled-components";
+import parseDocumentSlug from "shared/utils/parseDocumentSlug";
 import DocumentsStore from "stores/DocumentsStore";
 import PoliciesStore from "stores/PoliciesStore";
 import RevisionsStore from "stores/RevisionsStore";
@@ -18,9 +22,10 @@ import DocumentComponent from "./Document";
 import HideSidebar from "./HideSidebar";
 import Loading from "./Loading";
 import SocketPresence from "./SocketPresence";
-import { type LocationWithState } from "types";
+import { type LocationWithState, type Theme } from "types";
 import { NotFoundError, OfflineError } from "utils/errors";
 import { matchDocumentEdit, updateDocumentUrl } from "utils/routeHelpers";
+import { isInternalUrl } from "utils/urls";
 
 type Props = {|
   match: Match,
@@ -30,6 +35,7 @@ type Props = {|
   policies: PoliciesStore,
   revisions: RevisionsStore,
   ui: UiStore,
+  theme: Theme,
   history: RouterHistory,
 |};
 
@@ -43,6 +49,7 @@ class DataLoader extends React.Component<Props> {
     const { documents, match } = this.props;
     this.document = documents.getByUrl(match.params.documentSlug);
     this.loadDocument();
+    this.updateBackground();
   }
 
   componentDidUpdate(prevProps: Props) {
@@ -50,7 +57,8 @@ class DataLoader extends React.Component<Props> {
     // reload from the server otherwise the UI will not know which authorizations
     // the user has
     if (this.document) {
-      const policy = this.props.policies.get(this.document.id);
+      const document = this.document;
+      const policy = this.props.policies.get(document.id);
 
       if (!policy && !this.error) {
         this.loadDocument();
@@ -59,9 +67,20 @@ class DataLoader extends React.Component<Props> {
 
     // Also need to load the revision if it changes
     const { revisionId } = this.props.match.params;
-    if (prevProps.match.params.revisionId !== revisionId && revisionId) {
+    if (
+      prevProps.match.params.revisionId !== revisionId &&
+      revisionId &&
+      revisionId !== "latest"
+    ) {
       this.loadRevision();
     }
+    this.updateBackground();
+  }
+
+  updateBackground() {
+    // ensure the wider page color always matches the theme. This is to
+    // account for share links which don't sit in the wider Layout component
+    window.document.body.style.background = this.props.theme.background;
   }
 
   get isEditing() {
@@ -69,14 +88,50 @@ class DataLoader extends React.Component<Props> {
   }
 
   onSearchLink = async (term: string) => {
-    const results = await this.props.documents.search(term);
+    if (isInternalUrl(term)) {
+      // search for exact internal document
+      const slug = parseDocumentSlug(term);
+      try {
+        const document = await this.props.documents.fetch(slug);
+        const time = distanceInWordsToNow(document.updatedAt, {
+          addSuffix: true,
+        });
+        return [
+          {
+            title: document.title,
+            subtitle: `Updated ${time}`,
+            url: document.url,
+          },
+        ];
+      } catch (error) {
+        // NotFoundError could not find document for slug
+        if (!(error instanceof NotFoundError)) {
+          throw error;
+        }
+      }
+    }
 
-    return results
-      .filter((result) => result.document.title)
-      .map((result) => ({
-        title: result.document.title,
-        url: result.document.url,
-      }));
+    // default search for anything that doesn't look like a URL
+    const results = await this.props.documents.searchTitles(term);
+
+    return sortBy(
+      results.map((document) => {
+        const time = distanceInWordsToNow(document.updatedAt, {
+          addSuffix: true,
+        });
+        return {
+          title: document.title,
+          subtitle: `Updated ${time}`,
+          url: document.url,
+        };
+      }),
+      (document) =>
+        deburr(document.title)
+          .toLowerCase()
+          .startsWith(deburr(term).toLowerCase())
+          ? -1
+          : 1
+    );
   };
 
   onCreateLink = async (title: string) => {
@@ -101,12 +156,17 @@ class DataLoader extends React.Component<Props> {
   loadDocument = async () => {
     const { shareId, documentSlug, revisionId } = this.props.match.params;
 
+    // sets the document as active in the sidebar if we already have it loaded
+    if (this.document) {
+      this.props.ui.setActiveDocument(this.document);
+    }
+
     try {
       this.document = await this.props.documents.fetch(documentSlug, {
         shareId,
       });
 
-      if (revisionId) {
+      if (revisionId && revisionId !== "latest") {
         await this.loadRevision();
       } else {
         this.revision = undefined;
@@ -180,13 +240,11 @@ class DataLoader extends React.Component<Props> {
     }
 
     const abilities = policies.abilities(document.id);
-    const key = this.isEditing ? "editing" : "read-only";
 
     return (
       <SocketPresence documentId={document.id} isEditing={this.isEditing}>
         {this.isEditing && <HideSidebar ui={ui} />}
         <DocumentComponent
-          key={key}
           document={document}
           revision={revision}
           abilities={abilities}
@@ -208,5 +266,5 @@ export default withRouter(
     "revisions",
     "policies",
     "shares"
-  )(DataLoader)
+  )(withTheme(DataLoader))
 );
