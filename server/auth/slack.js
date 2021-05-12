@@ -47,35 +47,49 @@ router.get("slack.callback", auth({ required: false }), async (ctx) => {
 
   const data = await Slack.oauthAccess(code);
 
-  const [team,isFirstUser] = await Team.findOrCreateWithAuth({
-    where:{
-      name: data.team.name
-    },auth:{
-      name: "slack",
-      serviceId: data.team.id
-    },defaults:{
-      avatarUrl: data.team.image_88
-    }
+  const [team, isFirstUser] = await Team.findOrCreate({
+    where: {
+      slackId: data.team.id,
+    },
+    defaults: {
+      name: data.team.name,
+      avatarUrl: data.team.image_88,
+    },
   });
 
   try {
-    //What about invites
-    const [user,isFirstSignin] = await User.findOrCreateWithAuth({
-      where:{
+    const [user, isFirstSignin] = await User.findOrCreate({
+      where: {
+        [Op.or]: [
+          {
+            service: "slack",
+            serviceId: data.user.id,
+          },
+          {
+            service: { [Op.eq]: null },
+            email: data.user.email,
+          },
+        ],
+        teamId: team.id,
+      },
+      defaults: {
+        service: "slack",
+        serviceId: data.user.id,
         name: data.user.name,
-        teamId: team.id
-      },
-      auth:{
-        name: "slack",
-        serviceId: profile.user.id
-      },
-      defaults:{
+        email: data.user.email,
         isAdmin: isFirstUser,
-        email: data.user.email, // Because this can be changed
         avatarUrl: data.user.image_192,
-      }
-    })
-    
+      },
+    });
+
+    // update the user with fresh details if they just accepted an invite
+    if (!user.serviceId || !user.service) {
+      await user.update({
+        service: "slack",
+        serviceId: data.user.id,
+        avatarUrl: data.user.image_192,
+      });
+    }
 
     // update email address if it's changed in Slack
     if (!isFirstSignin && data.user.email !== user.email) {

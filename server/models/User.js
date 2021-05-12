@@ -7,10 +7,7 @@ import { ValidationError } from "../errors";
 import { sendEmail } from "../mailer";
 import { DataTypes, sequelize, encryptedFields } from "../sequelize";
 import { publicS3Endpoint, uploadToS3FromUrl } from "../utils/s3";
-import { sendEmail } from "../mailer";
-import { Star, Team, Collection, NotificationSetting, ApiKey,AuthenticationService } from ".";
-import user from "../presenters/user";
-
+import { Star, Team, Collection, NotificationSetting, ApiKey } from ".";
 
 const DEFAULT_AVATAR_HOST = "https://tiley.herokuapp.com";
 
@@ -27,7 +24,10 @@ const User = sequelize.define(
     name: DataTypes.STRING,
     avatarUrl: { type: DataTypes.STRING, allowNull: true },
     isAdmin: DataTypes.BOOLEAN,
-    jwtSecret: encryptedFields.vault("jwtSecret"),
+    service: { type: DataTypes.STRING, allowNull: true },
+    serviceId: { type: DataTypes.STRING, allowNull: true, unique: true },
+    slackData: DataTypes.JSONB,
+    jwtSecret: encryptedFields().vault("jwtSecret"),
     lastActiveAt: DataTypes.DATE,
     lastActiveIp: { type: DataTypes.STRING, allowNull: true },
     lastSignedInAt: DataTypes.DATE,
@@ -67,133 +67,11 @@ User.associate = (models) => {
   });
   User.hasMany(models.Document, { as: "documents" });
   User.hasMany(models.View, { as: "views" });
-  User.hasMany(models.AuthenticationService,
-    {
-    as:"authentications",
-    foreignKey: "authenticatableId",
-    constraints: false,
-    scope: {
-      authenticatableType: "user"
-    }
-  });
   User.belongsTo(models.Team);
-  User.addScope('withTeam', teamId => ({
-    where: { teamId },
-  }));
 };
-
-
-
-//Class methods
-User.findOneWithAuths = async function (userFilter) {
-  //what if we get all auths, and do a manual check instead of 
-  // normal because we dont need
-  return User.findOne({
-    where: userFilter,
-    include: [{
-      model: AuthenticationService,
-      as: "authentications",
-      //where: authFilter,
-      required: false
-    }]
-  })
-}
-
-
-
-User.findOrCreateWithAuth = async function (opts){
-  
-  let currentUser = await AuthenticationService.fetchUser({
-    ...opts.auth
-  },opts.user)
-
-  if(!currentUser){
-    
-    currentUser = await User.findOne({
-      where: { 
-        ...opts.where 
-      },
-      include: [{
-        model: AuthenticationService,
-        as: "authentications",
-        required: true
-      }]
-    });
-
-  }
-  
-
-  let created = false;
-  let user = currentUser;
-  let newAuthCreated = false;
-
-  if(!currentUser){
-    
-    user = await User.create({
-        ...opts.where,
-        ...opts.defaults,
-        authentications:{
-          ...opts.auth
-        }
-      },{
-      include:{
-        model: AuthenticationService,
-        as: "authentications",
-      }
-    });
-    created = true
-
-  }else{
-    
-    if(!currentUser.getAuth(opts.auth.name)){
-      await AuthenticationService.create({
-        ...opts.auth,
-        authenticatableType: "user",
-        authenticatableId: user.id
-      }) //this doesnt get attached to the user
-
-      newAuthCreated = true
-      //Update the user with the new auth method
-      //Is there any better way to do that ? like `.set`
-      await user.reload()
-    }
-  
-  }
-  return [user,created,newAuthCreated];
-}
-
-
-
 
 // Instance methods
-User.prototype.addAuth = async function (options){
-  
-  return await AuthenticationService.create({
-      ...options,
-      authenticatableType: "user",
-      authenticatableId: this.id
-  })
-};
-
-//Invites dont really need an empty auth !
-// User.prototype.addEmailInviteAuth = async function(){
-//   return this.addAuth({
-//     name: "email",
-//     serviceId: null
-//   })
-// };
-
-User.prototype.getAuth = function(service:string){
-
-  if(!this.authentications) return false;
-
-  return this.authentications.find((s)=>{
-      return s.name == service;
-  });
-  
-};
-
-User.prototype.collectionIds = async function(paranoid: boolean = true) {
+User.prototype.collectionIds = async function (paranoid: boolean = true) {
   const collectionStubs = await Collection.scope({
     method: ["withMembership", this.id],
   }).findAll({

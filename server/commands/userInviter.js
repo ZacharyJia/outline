@@ -56,10 +56,10 @@ export default async function userInviter({
             teamId: user.teamId,
             name: invite.name,
             email: invite.email,
+            service: null,
           },
           { transaction }
         );
-        
         users.push(newUser);
         await Event.create(
           {
