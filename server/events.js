@@ -35,6 +35,7 @@ export type DocumentEvent =
   name: | "documents.create" // eslint-disable-line
         | "documents.publish"
         | "documents.delete"
+        | "documents.permanent_delete"
         | "documents.pin"
         | "documents.unpin"
         | "documents.archive"
@@ -47,6 +48,10 @@ export type DocumentEvent =
       teamId: string,
       actorId: string,
       ip: string,
+      data: {
+        title: string,
+        source?: "import",
+      },
     }
   | {
       name: "documents.move",
@@ -97,6 +102,15 @@ export type RevisionEvent = {
   teamId: string,
 };
 
+export type CollectionImportEvent = {
+  name: "collections.import",
+  modelId: string,
+  teamId: string,
+  actorId: string,
+  data: { type: "outline" },
+  ip: string,
+};
+
 export type CollectionEvent =
   | {
   name: | "collections.create" // eslint-disable-line
@@ -105,6 +119,7 @@ export type CollectionEvent =
       collectionId: string,
       teamId: string,
       actorId: string,
+      data: { name: string },
       ip: string,
     }
   | {
@@ -121,6 +136,14 @@ export type CollectionEvent =
       teamId: string,
       actorId: string,
       data: { name: string, groupId: string },
+      ip: string,
+    }
+  | {
+      name: "collections.move",
+      collectionId: string,
+      teamId: string,
+      actorId: string,
+      data: { index: string },
       ip: string,
     };
 
@@ -163,6 +186,7 @@ export type Event =
   | UserEvent
   | DocumentEvent
   | CollectionEvent
+  | CollectionImportEvent
   | IntegrationEvent
   | GroupEvent
   | RevisionEvent

@@ -1,4 +1,5 @@
 // @flow
+import { transparentize } from "polished";
 import * as React from "react";
 import { withRouter, type RouterHistory, type Match } from "react-router-dom";
 import styled, { withTheme } from "styled-components";
@@ -29,25 +30,28 @@ type Props = {
   depth?: number,
 };
 
-function SidebarLink({
-  icon,
-  children,
-  onClick,
-  onMouseEnter,
-  to,
-  label,
-  active,
-  isActiveDrop,
-  menu,
-  showActions,
-  theme,
-  exact,
-  href,
-  depth,
-  history,
-  match,
-  className,
-}: Props) {
+function SidebarLink(
+  {
+    icon,
+    children,
+    onClick,
+    onMouseEnter,
+    to,
+    label,
+    active,
+    isActiveDrop,
+    menu,
+    showActions,
+    theme,
+    exact,
+    href,
+    depth,
+    history,
+    match,
+    className,
+  }: Props,
+  ref
+) {
   const style = React.useMemo(() => {
     return {
       paddingLeft: `${(depth || 0) * 16 + 16}px`,
@@ -66,22 +70,25 @@ function SidebarLink({
   };
 
   return (
-    <Link
-      $isActiveDrop={isActiveDrop}
-      activeStyle={isActiveDrop ? activeDropStyle : activeStyle}
-      style={active ? activeStyle : style}
-      onClick={onClick}
-      onMouseEnter={onMouseEnter}
-      exact={exact !== false}
-      to={to}
-      as={to ? undefined : href ? "a" : "div"}
-      href={href}
-      className={className}
-    >
-      {icon && <IconWrapper>{icon}</IconWrapper>}
-      <Label>{label}</Label>
+    <>
+      <Link
+        $isActiveDrop={isActiveDrop}
+        activeStyle={isActiveDrop ? activeDropStyle : activeStyle}
+        style={active ? activeStyle : style}
+        onClick={onClick}
+        onMouseEnter={onMouseEnter}
+        exact={exact !== false}
+        to={to}
+        as={to ? undefined : href ? "a" : "div"}
+        href={href}
+        className={className}
+        ref={ref}
+      >
+        {icon && <IconWrapper>{icon}</IconWrapper>}
+        <Label>{label}</Label>
+      </Link>
       {menu && <Actions showActions={showActions}>{menu}</Actions>}
-    </Link>
+    </>
   );
 }
 
@@ -109,6 +116,8 @@ const Actions = styled(EventBoundary)`
   }
 
   &:hover {
+    display: inline-flex;
+
     svg {
       opacity: 0.75;
     }
@@ -126,7 +135,7 @@ const Link = styled(NavLink)`
     props.$isActiveDrop ? props.theme.slateDark : "inherit"};
   color: ${(props) =>
     props.$isActiveDrop ? props.theme.white : props.theme.sidebarText};
-  font-size: 15px;
+  font-size: 16px;
   cursor: pointer;
   overflow: hidden;
 
@@ -135,30 +144,33 @@ const Link = styled(NavLink)`
     transition: fill 50ms;
   }
 
-  &:hover {
-    color: ${(props) =>
-      props.$isActiveDrop ? props.theme.white : props.theme.text};
-  }
-
   &:focus {
     color: ${(props) => props.theme.text};
-    background: ${(props) => props.theme.black05};
-  }
-
-  &:hover,
-  &:active {
-    > ${Actions} {
-      display: inline-flex;
-
-      svg {
-        opacity: 0.75;
-      }
-    }
+    background: ${(props) =>
+      transparentize("0.25", props.theme.sidebarItemBackground)};
   }
 
   ${breakpoint("tablet")`
-    padding: 4px 16px;
+    padding: 4px 32px 4px 16px;
+    font-size: 15px;
   `}
+
+  @media (hover: hover) {
+    &:hover + ${Actions},
+    &:active + ${Actions} {
+        display: inline-flex;
+
+        svg {
+          opacity: 0.75;
+        }
+      }
+    }
+
+    &:hover {
+      color: ${(props) =>
+        props.$isActiveDrop ? props.theme.white : props.theme.text};
+    }
+  }
 `;
 
 const Label = styled.div`
@@ -166,6 +178,9 @@ const Label = styled.div`
   width: 100%;
   max-height: 4.8em;
   line-height: 1.6;
+  * {
+    unicode-bidi: plaintext;
+  }
 `;
 
-export default withRouter(withTheme(SidebarLink));
+export default withRouter(withTheme(React.forwardRef(SidebarLink)));

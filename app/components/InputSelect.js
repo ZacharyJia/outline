@@ -16,6 +16,10 @@ const Select = styled.select`
   color: ${(props) => props.theme.text};
   height: 30px;
 
+  option {
+    background: ${(props) => props.theme.buttonNeutralBackground};
+  }
+
   &:disabled,
   &::placeholder {
     color: ${(props) => props.theme.placeholder};
@@ -27,7 +31,7 @@ const Wrapper = styled.label`
   max-width: ${(props) => (props.short ? "350px" : "100%")};
 `;
 
-type Option = { label: string, value: string };
+export type Option = { label: string, value: string };
 
 export type Props = {
   value?: string,

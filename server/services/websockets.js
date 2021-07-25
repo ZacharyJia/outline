@@ -1,5 +1,5 @@
 // @flow
-import subHours from "date-fns/sub_hours";
+import { subHours } from "date-fns";
 import type { Event } from "../events";
 import { socketio } from "../main";
 import {
@@ -77,6 +77,13 @@ export default class Websockets {
                 id: document.collectionId,
               },
             ],
+          });
+      }
+      case "documents.permanent_delete": {
+        return socketio
+          .to(`collection-${event.collectionId}`)
+          .emit(event.name, {
+            documentId: event.documentId,
           });
       }
       case "documents.pin":
@@ -157,9 +164,9 @@ export default class Websockets {
 
         socketio
           .to(
-            collection.private
-              ? `collection-${collection.id}`
-              : `team-${collection.teamId}`
+            collection.permission
+              ? `team-${collection.teamId}`
+              : `collection-${collection.id}`
           )
           .emit("entities", {
             event: event.name,
@@ -170,11 +177,12 @@ export default class Websockets {
               },
             ],
           });
+
         return socketio
           .to(
-            collection.private
-              ? `collection-${collection.id}`
-              : `team-${collection.teamId}`
+            collection.permission
+              ? `team-${collection.teamId}`
+              : `collection-${collection.id}`
           )
           .emit("join", {
             event: event.name,
@@ -197,6 +205,16 @@ export default class Websockets {
           ],
         });
       }
+
+      case "collections.move": {
+        return socketio
+          .to(`collection-${event.collectionId}`)
+          .emit("collections.update_index", {
+            collectionId: event.collectionId,
+            index: event.data.index,
+          });
+      }
+
       case "collections.add_user": {
         // the user being added isn't yet in the websocket channel for the collection
         // so they need to be notified separately
@@ -368,6 +386,10 @@ export default class Websockets {
           const collection = await Collection.scope({
             method: ["withMembership", event.userId],
           }).findByPk(collectionGroup.collectionId);
+
+          if (!collection) {
+            continue;
+          }
 
           const hasMemberships =
             collection.memberships.length > 0 ||

@@ -9,49 +9,11 @@ import {
   MenuItem as BaseMenuItem,
 } from "reakit/Menu";
 import styled from "styled-components";
+import Header from "./Header";
 import MenuItem, { MenuAnchor } from "./MenuItem";
 import Separator from "./Separator";
 import ContextMenu from ".";
-
-type TMenuItem =
-  | {|
-      title: React.Node,
-      to: string,
-      visible?: boolean,
-      selected?: boolean,
-      disabled?: boolean,
-    |}
-  | {|
-      title: React.Node,
-      onClick: (event: SyntheticEvent<>) => void | Promise<void>,
-      visible?: boolean,
-      selected?: boolean,
-      disabled?: boolean,
-    |}
-  | {|
-      title: React.Node,
-      href: string,
-      visible?: boolean,
-      selected?: boolean,
-      disabled?: boolean,
-    |}
-  | {|
-      title: React.Node,
-      visible?: boolean,
-      disabled?: boolean,
-      style?: Object,
-      hover?: boolean,
-      items: TMenuItem[],
-    |}
-  | {|
-      type: "separator",
-      visible?: boolean,
-    |}
-  | {|
-      type: "heading",
-      visible?: boolean,
-      title: React.Node,
-    |};
+import { type MenuItem as TMenuItem } from "types";
 
 type Props = {|
   items: TMenuItem[],
@@ -59,7 +21,8 @@ type Props = {|
 
 const Disclosure = styled(ExpandedIcon)`
   transform: rotate(270deg);
-  justify-self: flex-end;
+  position: absolute;
+  right: 8px;
 `;
 
 const Submenu = React.forwardRef(({ templateItems, title, ...rest }, ref) => {
@@ -82,7 +45,7 @@ const Submenu = React.forwardRef(({ templateItems, title, ...rest }, ref) => {
   );
 });
 
-function Template({ items, ...menu }: Props): React.Node {
+export function filterTemplateItems(items: TMenuItem[]): TMenuItem[] {
   let filtered = items.filter((item) => item.visible !== false);
 
   // this block literally just trims unneccessary separators
@@ -100,7 +63,11 @@ function Template({ items, ...menu }: Props): React.Node {
     return [...acc, item];
   }, []);
 
-  return filtered.map((item, index) => {
+  return filtered;
+}
+
+function Template({ items, ...menu }: Props): React.Node {
+  return filterTemplateItems(items).map((item, index) => {
     if (item.to) {
       return (
         <MenuItem
@@ -123,7 +90,8 @@ function Template({ items, ...menu }: Props): React.Node {
           key={index}
           disabled={item.disabled}
           selected={item.selected}
-          target="_blank"
+          level={item.level}
+          target={item.href.startsWith("#") ? undefined : "_blank"}
           {...menu}
         >
           {item.title}
@@ -162,6 +130,11 @@ function Template({ items, ...menu }: Props): React.Node {
       return <Separator key={index} />;
     }
 
+    if (item.type === "heading") {
+      return <Header>{item.title}</Header>;
+    }
+
+    console.warn("Unrecognized menu item", item);
     return null;
   });
 }

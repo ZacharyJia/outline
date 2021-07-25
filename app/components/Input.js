@@ -4,6 +4,7 @@ import { observer } from "mobx-react";
 import * as React from "react";
 import { VisuallyHidden } from "reakit/VisuallyHidden";
 import styled from "styled-components";
+import breakpoint from "styled-components-breakpoint";
 import Flex from "components/Flex";
 
 const RealTextarea = styled.textarea`
@@ -28,15 +29,28 @@ const RealInput = styled.input`
   background: none;
   color: ${(props) => props.theme.text};
   height: 30px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 
   &:disabled,
   &::placeholder {
     color: ${(props) => props.theme.placeholder};
   }
+
+  &::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+  }
+
+  ${breakpoint("mobile", "tablet")`
+    font-size: 16px;
+  `};
 `;
 
 const Wrapper = styled.div`
   flex: ${(props) => (props.flex ? "1" : "0")};
+  width: ${(props) => (props.short ? "49%" : "auto")};
   max-width: ${(props) => (props.short ? "350px" : "100%")};
   min-height: ${({ minHeight }) => (minHeight ? `${minHeight}px` : "0")};
   max-height: ${({ maxHeight }) => (maxHeight ? `${maxHeight}px` : "initial")};
@@ -50,7 +64,6 @@ const IconWrapper = styled.span`
 `;
 
 export const Outline = styled(Flex)`
-  display: flex;
   flex: 1;
   margin: ${(props) =>
     props.margin !== undefined ? props.margin : "0 0 16px"};
@@ -59,7 +72,7 @@ export const Outline = styled(Flex)`
   border-style: solid;
   border-color: ${(props) =>
     props.hasError
-      ? "red"
+      ? props.theme.danger
       : props.focused
       ? props.theme.inputBorderFocused
       : props.theme.inputBorder};
@@ -76,7 +89,7 @@ export const LabelText = styled.div`
 `;
 
 export type Props = {|
-  type?: "text" | "email" | "checkbox" | "search",
+  type?: "text" | "email" | "checkbox" | "search" | "textarea",
   value?: string,
   label?: string,
   className?: string,
@@ -92,10 +105,14 @@ export type Props = {|
   autoComplete?: boolean | string,
   readOnly?: boolean,
   required?: boolean,
+  disabled?: boolean,
   placeholder?: string,
-  onChange?: (ev: SyntheticInputEvent<HTMLInputElement>) => mixed,
-  onFocus?: (ev: SyntheticEvent<>) => void,
-  onBlur?: (ev: SyntheticEvent<>) => void,
+  onChange?: (
+    ev: SyntheticInputEvent<HTMLInputElement | HTMLTextAreaElement>
+  ) => mixed,
+  onKeyDown?: (ev: SyntheticKeyboardEvent<HTMLInputElement>) => mixed,
+  onFocus?: (ev: SyntheticEvent<>) => mixed,
+  onBlur?: (ev: SyntheticEvent<>) => mixed,
 |};
 
 @observer

@@ -5,7 +5,7 @@ import { BackIcon, EmailIcon } from "outline-icons";
 import * as React from "react";
 import { Redirect, Link, type Location } from "react-router-dom";
 import styled from "styled-components";
-import getQueryVariable from "shared/utils/getQueryVariable";
+import { setCookie } from "tiny-cookie";
 import ButtonLarge from "components/ButtonLarge";
 import Fade from "components/Fade";
 import Flex from "components/Flex";
@@ -15,8 +15,9 @@ import OutlineLogo from "components/OutlineLogo";
 import PageTitle from "components/PageTitle";
 import TeamLogo from "components/TeamLogo";
 import Notices from "./Notices";
-import Service from "./Service";
+import Provider from "./Provider";
 import env from "env";
+import useQuery from "hooks/useQuery";
 import useStores from "hooks/useStores";
 
 type Props = {|
@@ -24,6 +25,7 @@ type Props = {|
 |};
 
 function Login({ location }: Props) {
+  const query = useQuery();
   const { auth } = useStores();
   const { config } = auth;
   const [emailLinkSentTo, setEmailLinkSentTo] = React.useState("");
@@ -41,7 +43,16 @@ function Login({ location }: Props) {
     auth.fetchConfig();
   }, [auth]);
 
-  console.log(config);
+  React.useEffect(() => {
+    const entries = Object.fromEntries(query.entries());
+
+    // We don't want to override this cookie if we're viewing an error notice
+    // sent back from the server via query string (notice=), or if there are no
+    // query params at all.
+    if (Object.keys(entries).length && !query.get("notice")) {
+      setCookie("signupQueryParams", JSON.stringify(entries));
+    }
+  }, [query]);
 
   if (auth.authenticated) {
     return <Redirect to="/home" />;
@@ -52,10 +63,10 @@ function Login({ location }: Props) {
     return null;
   }
 
-  const hasMultipleServices = config.services.length > 1;
-  const defaultService = find(
-    config.services,
-    (service) => service.id === auth.lastSignedIn && !isCreate
+  const hasMultipleProviders = config.providers.length > 1;
+  const defaultProvider = find(
+    config.providers,
+    (provider) => provider.id === auth.lastSignedIn && !isCreate
   );
 
   const header =
@@ -106,40 +117,47 @@ function Login({ location }: Props) {
         </Logo>
 
         {isCreate ? (
-          <Heading centered>Create an account</Heading>
+          <>
+            <Heading centered>Create an account</Heading>
+            <GetStarted>
+              Get started by choosing a sign-in method for your new team below…
+            </GetStarted>
+          </>
         ) : (
           <Heading centered>Login to {config.name || "Outline"}</Heading>
         )}
 
-        <Notices notice={getQueryVariable("notice")} />
+        <Notices />
 
-        {defaultService && (
-          <React.Fragment key={defaultService.id}>
-            <Service
+        {defaultProvider && (
+          <React.Fragment key={defaultProvider.id}>
+            <Provider
               isCreate={isCreate}
               onEmailSuccess={handleEmailSuccess}
-              {...defaultService}
+              {...defaultProvider}
             />
-            {hasMultipleServices && (
+            {hasMultipleProviders && (
               <>
-                <Note>You signed in with {defaultService.name} last time.</Note>
+                <Note>
+                  You signed in with {defaultProvider.name} last time.
+                </Note>
                 <Or />
               </>
             )}
           </React.Fragment>
         )}
 
-        {config.services.map((service) => {
-          if (defaultService && service.id === defaultService.id) {
+        {config.providers.map((provider) => {
+          if (defaultProvider && provider.id === defaultProvider.id) {
             return null;
           }
 
           return (
-            <Service
-              key={service.id}
+            <Provider
+              key={provider.id}
               isCreate={isCreate}
               onEmailSuccess={handleEmailSuccess}
-              {...service}
+              {...provider}
             />
           );
         })}
@@ -168,6 +186,11 @@ const Background = styled(Fade)`
 const Logo = styled.div`
   margin-bottom: -1.5em;
   height: 38px;
+`;
+
+const GetStarted = styled(HelpText)`
+  text-align: center;
+  margin-top: -12px;
 `;
 
 const Note = styled(HelpText)`

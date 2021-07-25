@@ -1,26 +1,26 @@
 // @flow
 import { observable } from "mobx";
 import { observer, inject } from "mobx-react";
+import { ProfileIcon } from "outline-icons";
 import * as React from "react";
 import { Trans, withTranslation, type TFunction } from "react-i18next";
 import styled from "styled-components";
 import { languageOptions } from "shared/i18n";
-
 import AuthStore from "stores/AuthStore";
-import UiStore from "stores/UiStore";
+import ToastsStore from "stores/ToastsStore";
 import UserDelete from "scenes/UserDelete";
 import Button from "components/Button";
-import CenteredContent from "components/CenteredContent";
 import Flex from "components/Flex";
+import Heading from "components/Heading";
 import HelpText from "components/HelpText";
 import Input, { LabelText } from "components/Input";
 import InputSelect from "components/InputSelect";
-import PageTitle from "components/PageTitle";
+import Scene from "components/Scene";
 import ImageUpload from "./components/ImageUpload";
 
 type Props = {
   auth: AuthStore,
-  ui: UiStore,
+  toasts: ToastsStore,
   t: TFunction,
 };
 
@@ -55,7 +55,7 @@ class Profile extends React.Component<Props> {
       language: this.language,
     });
 
-    this.props.ui.showToast(t("Profile saved"), { type: "success" });
+    this.props.toasts.showToast(t("Profile saved"), { type: "success" });
   };
 
   handleNameChange = (ev: SyntheticInputEvent<*>) => {
@@ -69,12 +69,14 @@ class Profile extends React.Component<Props> {
     await this.props.auth.updateUser({
       avatarUrl: this.avatarUrl,
     });
-    this.props.ui.showToast(t("Profile picture updated"), { type: "success" });
+    this.props.toasts.showToast(t("Profile picture updated"), {
+      type: "success",
+    });
   };
 
   handleAvatarError = (error: ?string) => {
     const { t } = this.props;
-    this.props.ui.showToast(
+    this.props.toasts.showToast(
       error || t("Unable to upload new profile picture"),
       { type: "error" }
     );
@@ -99,9 +101,8 @@ class Profile extends React.Component<Props> {
     const avatarUrl = this.avatarUrl || user.avatarUrl;
 
     return (
-      <CenteredContent>
-        <PageTitle title={t("Profile")} />
-        <h1>{t("Profile")}</h1>
+      <Scene title={t("Profile")} icon={<ProfileIcon color="currentColor" />}>
+        <Heading>{t("Profile")}</Heading>
         <ProfilePicture column>
           <LabelText>{t("Photo")}</LabelText>
           <AvatarContainer>
@@ -168,7 +169,7 @@ class Profile extends React.Component<Props> {
         {this.showDeleteModal && (
           <UserDelete onRequestClose={this.toggleDeleteAccount} />
         )}
-      </CenteredContent>
+      </Scene>
     );
   }
 }
@@ -214,4 +215,4 @@ const Avatar = styled.img`
   ${avatarStyles};
 `;
 
-export default withTranslation()<Profile>(inject("auth", "ui")(Profile));
+export default withTranslation()<Profile>(inject("auth", "toasts")(Profile));

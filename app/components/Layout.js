@@ -6,30 +6,36 @@ import * as React from "react";
 import { Helmet } from "react-helmet";
 import { withTranslation, type TFunction } from "react-i18next";
 import keydown from "react-keydown";
-import { Switch, Route, Redirect } from "react-router-dom";
-import styled, { withTheme } from "styled-components";
+import {
+  Switch,
+  Route,
+  Redirect,
+  withRouter,
+  type RouterHistory,
+} from "react-router-dom";
+import styled from "styled-components";
 import breakpoint from "styled-components-breakpoint";
 import AuthStore from "stores/AuthStore";
 import DocumentsStore from "stores/DocumentsStore";
+import PoliciesStore from "stores/PoliciesStore";
 import UiStore from "stores/UiStore";
 import ErrorSuspended from "scenes/ErrorSuspended";
 import KeyboardShortcuts from "scenes/KeyboardShortcuts";
-import Analytics from "components/Analytics";
 import Button from "components/Button";
 import DocumentHistory from "components/DocumentHistory";
 import Flex from "components/Flex";
+import Guide from "components/Guide";
 import { LoadingIndicatorBar } from "components/LoadingIndicator";
-import Modal from "components/Modal";
 import Sidebar from "components/Sidebar";
 import SettingsSidebar from "components/Sidebar/Settings";
 import SkipNavContent from "components/SkipNavContent";
 import SkipNavLink from "components/SkipNavLink";
-import { type Theme } from "types";
 import { meta } from "utils/keyboard";
 import {
   homeUrl,
   searchUrl,
   matchDocumentSlug as slug,
+  newDocumentUrl,
 } from "utils/routeHelpers";
 
 type Props = {
@@ -39,8 +45,9 @@ type Props = {
   title?: ?React.Node,
   auth: AuthStore,
   ui: UiStore,
+  history: RouterHistory,
+  policies: PoliciesStore,
   notifications?: React.Node,
-  theme: Theme,
   i18n: Object,
   t: TFunction,
 };
@@ -51,22 +58,10 @@ class Layout extends React.Component<Props> {
   @observable redirectTo: ?string;
   @observable keyboardShortcutsOpen: boolean = false;
 
-  constructor(props: Props) {
-    super();
-    this.updateBackground(props);
-  }
-
   componentDidUpdate() {
-    this.updateBackground(this.props);
-
     if (this.redirectTo) {
       this.redirectTo = undefined;
     }
-  }
-
-  updateBackground(props: Props) {
-    // ensure the wider page color always matches the theme
-    window.document.body.style.background = props.theme.background;
   }
 
   @keydown(`${meta}+.`)
@@ -76,7 +71,6 @@ class Layout extends React.Component<Props> {
 
   @keydown("shift+/")
   handleOpenKeyboardShortcuts() {
-    if (this.props.ui.editMode) return;
     this.keyboardShortcutsOpen = true;
   }
 
@@ -86,7 +80,6 @@ class Layout extends React.Component<Props> {
 
   @keydown(["t", "/", `${meta}+k`])
   goToSearch(ev: SyntheticEvent<>) {
-    if (this.props.ui.editMode) return;
     ev.preventDefault();
     ev.stopPropagation();
     this.redirectTo = searchUrl();
@@ -94,15 +87,25 @@ class Layout extends React.Component<Props> {
 
   @keydown("d")
   goToDashboard() {
-    if (this.props.ui.editMode) return;
     this.redirectTo = homeUrl();
+  }
+
+  @keydown("n")
+  goToNewDocument() {
+    const { activeCollectionId } = this.props.ui;
+    if (!activeCollectionId) return;
+
+    const can = this.props.policies.abilities(activeCollectionId);
+    if (!can.update) return;
+
+    this.props.history.push(newDocumentUrl(activeCollectionId));
   }
 
   render() {
     const { auth, t, ui } = this.props;
     const { user, team } = auth;
     const showSidebar = auth.authenticated && user && team;
-    const sidebarCollapsed = ui.editMode || ui.sidebarCollapsed;
+    const sidebarCollapsed = ui.isEditing || ui.sidebarCollapsed;
 
     if (auth.isSuspended) return <ErrorSuspended />;
     if (this.redirectTo) return <Redirect to={this.redirectTo} push />;
@@ -117,7 +120,6 @@ class Layout extends React.Component<Props> {
           />
         </Helmet>
         <SkipNavLink />
-        <Analytics />
 
         {this.props.ui.progressBarVisible && <LoadingIndicatorBar />}
         {this.props.notifications}
@@ -159,13 +161,13 @@ class Layout extends React.Component<Props> {
             />
           </Switch>
         </Container>
-        <Modal
+        <Guide
           isOpen={this.keyboardShortcutsOpen}
           onRequestClose={this.handleCloseKeyboardShortcuts}
           title={t("Keyboard shortcuts")}
         >
           <KeyboardShortcuts />
-        </Modal>
+        </Guide>
       </Container>
     );
   }
@@ -200,7 +202,7 @@ const Content = styled(Flex)`
     props.$isResizing ? "none" : `margin-left 100ms ease-out`};
 
   @media print {
-    margin: 0;
+    margin: 0 !important;
   }
 
   ${breakpoint("mobile", "tablet")`
@@ -215,5 +217,5 @@ const Content = styled(Flex)`
 `;
 
 export default withTranslation()<Layout>(
-  inject("auth", "ui", "documents")(withTheme(Layout))
+  inject("auth", "ui", "documents", "policies")(withRouter(Layout))
 );

@@ -1,6 +1,8 @@
 // @flow
+import retry from "fetch-retry";
 import invariant from "invariant";
 import { map, trim } from "lodash";
+import { getCookie } from "tiny-cookie";
 import stores from "stores";
 import download from "./download";
 import {
@@ -17,6 +19,13 @@ import {
 type Options = {
   baseUrl?: string,
 };
+
+// authorization cookie set by a Cloudflare Access proxy
+const CF_AUTHORIZATION = getCookie("CF_Authorization");
+// if the cookie is set, we must pass it with all ApiClient requests
+const CREDENTIALS = CF_AUTHORIZATION ? "same-origin" : "omit";
+
+const fetchWithRetry = retry(fetch);
 
 class ApiClient {
   baseUrl: string;
@@ -86,12 +95,12 @@ class ApiClient {
 
     let response;
     try {
-      response = await fetch(urlToFetch, {
+      response = await fetchWithRetry(urlToFetch, {
         method,
         body,
         headers,
         redirect: "follow",
-        credentials: "omit",
+        credentials: CREDENTIALS,
         cache: "no-cache",
       });
     } catch (err) {
@@ -148,6 +157,10 @@ class ApiClient {
     }
 
     if (response.status === 403) {
+      if (error.error === "user_suspended") {
+        stores.auth.logout();
+        return;
+      }
       throw new AuthorizationError(error.message);
     }
 

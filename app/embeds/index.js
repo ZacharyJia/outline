@@ -4,11 +4,14 @@ import styled from "styled-components";
 import Image from "components/Image";
 import Abstract from "./Abstract";
 import Airtable from "./Airtable";
+import Cawemo from "./Cawemo";
 import ClickUp from "./ClickUp";
 import Codepen from "./Codepen";
+import Descript from "./Descript";
 import Figma from "./Figma";
 import Framer from "./Framer";
 import Gist from "./Gist";
+import GoogleDataStudio from "./GoogleDataStudio";
 import GoogleDocs from "./GoogleDocs";
 import GoogleDrawings from "./GoogleDrawings";
 import GoogleDrive from "./GoogleDrive";
@@ -62,8 +65,17 @@ export default [
     matcher: matcher(Airtable),
   },
   {
+    title: "Cawemo",
+    keywords: "bpmn process",
+    defaultHidden: true,
+    icon: () => <Img src="/images/cawemo.png" />,
+    component: Cawemo,
+    matcher: matcher(Cawemo),
+  },
+  {
     title: "ClickUp",
     keywords: "project",
+    defaultHidden: true,
     icon: () => <Img src="/images/clickup.png" />,
     component: ClickUp,
     matcher: matcher(ClickUp),
@@ -74,6 +86,13 @@ export default [
     icon: () => <Img src="/images/codepen.png" />,
     component: Codepen,
     matcher: matcher(Codepen),
+  },
+  {
+    title: "Descript",
+    keywords: "audio",
+    icon: () => <Img src="/images/descript.png" />,
+    component: Descript,
+    matcher: matcher(Descript),
   },
   {
     title: "Figma",
@@ -131,8 +150,16 @@ export default [
     matcher: matcher(GoogleSlides),
   },
   {
+    title: "Google Data Studio",
+    keywords: "business intelligence",
+    icon: () => <Img src="/images/google-datastudio.png" />,
+    component: GoogleDataStudio,
+    matcher: matcher(GoogleDataStudio),
+  },
+  {
     title: "InVision",
     keywords: "design prototype",
+    defaultHidden: true,
     icon: () => <Img src="/images/invision.png" />,
     component: InVision,
     matcher: matcher(InVision),
@@ -175,6 +202,7 @@ export default [
   {
     title: "Mode",
     keywords: "analytics",
+    defaultHidden: true,
     icon: () => <Img src="/images/mode-analytics.png" />,
     component: ModeAnalytics,
     matcher: matcher(ModeAnalytics),

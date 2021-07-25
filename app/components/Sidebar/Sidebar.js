@@ -3,182 +3,207 @@ import { observer } from "mobx-react";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 import { Portal } from "react-portal";
-import { withRouter } from "react-router-dom";
-import type { Location } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import styled, { useTheme } from "styled-components";
 import breakpoint from "styled-components-breakpoint";
 import Fade from "components/Fade";
 import Flex from "components/Flex";
-import CollapseToggle, {
-  Button as CollapseButton,
-} from "./components/CollapseToggle";
 import ResizeBorder from "./components/ResizeBorder";
-import ResizeHandle from "./components/ResizeHandle";
+import Toggle, { ToggleButton, Positioner } from "./components/Toggle";
 import usePrevious from "hooks/usePrevious";
 import useStores from "hooks/useStores";
+import { fadeIn } from "styles/animations";
 
-let firstRender = true;
-let BOUNCE_ANIMATION_MS = 250;
+let ANIMATION_MS = 250;
+let isFirstRender = true;
 
-type Props = {
+type Props = {|
   children: React.Node,
-  location: Location,
-};
+|};
 
-const useResize = ({ width, minWidth, maxWidth, setWidth }) => {
-  const [offset, setOffset] = React.useState(0);
-  const [isAnimating, setAnimating] = React.useState(false);
-  const [isResizing, setResizing] = React.useState(false);
-  const isSmallerThanMinimum = width < minWidth;
+const Sidebar = React.forwardRef<Props, HTMLButtonElement>(
+  ({ children }: Props, ref) => {
+    const [isCollapsing, setCollapsing] = React.useState(false);
+    const theme = useTheme();
+    const { t } = useTranslation();
+    const { ui } = useStores();
+    const location = useLocation();
+    const previousLocation = usePrevious(location);
 
-  const handleDrag = React.useCallback(
-    (event: MouseEvent) => {
-      // suppresses text selection
-      event.preventDefault();
+    const width = ui.sidebarWidth;
+    const collapsed = ui.isEditing || ui.sidebarCollapsed;
+    const maxWidth = theme.sidebarMaxWidth;
+    const minWidth = theme.sidebarMinWidth + 16; // padding
+    const setWidth = ui.setSidebarWidth;
 
-      // this is simple because the sidebar is always against the left edge
-      const width = Math.min(event.pageX - offset, maxWidth);
-      setWidth(width);
-    },
-    [offset, maxWidth, setWidth]
-  );
+    const [offset, setOffset] = React.useState(0);
+    const [isAnimating, setAnimating] = React.useState(false);
+    const [isResizing, setResizing] = React.useState(false);
+    const isSmallerThanMinimum = width < minWidth;
 
-  const handleStopDrag = React.useCallback(() => {
-    setResizing(false);
+    const handleDrag = React.useCallback(
+      (event: MouseEvent) => {
+        // suppresses text selection
+        event.preventDefault();
 
-    if (isSmallerThanMinimum) {
-      setWidth(minWidth);
-      setAnimating(true);
-    } else {
-      setWidth(width);
-    }
-  }, [isSmallerThanMinimum, minWidth, width, setWidth]);
+        // this is simple because the sidebar is always against the left edge
+        const width = Math.min(event.pageX - offset, maxWidth);
+        const isSmallerThanCollapsePoint = width < minWidth / 2;
 
-  const handleStartDrag = React.useCallback(
-    (event) => {
-      setOffset(event.pageX - width);
-      setResizing(true);
-      setAnimating(false);
-    },
-    [width]
-  );
+        if (isSmallerThanCollapsePoint) {
+          setWidth(theme.sidebarCollapsedWidth);
+        } else {
+          setWidth(width);
+        }
+      },
+      [theme, offset, minWidth, maxWidth, setWidth]
+    );
 
-  React.useEffect(() => {
-    if (isAnimating) {
-      setTimeout(() => setAnimating(false), BOUNCE_ANIMATION_MS);
-    }
-  }, [isAnimating]);
+    const handleStopDrag = React.useCallback(
+      (event: MouseEvent) => {
+        setResizing(false);
 
-  React.useEffect(() => {
-    if (isResizing) {
-      document.addEventListener("mousemove", handleDrag);
-      document.addEventListener("mouseup", handleStopDrag);
-    }
+        if (document.activeElement) {
+          document.activeElement.blur();
+        }
 
-    return () => {
-      document.removeEventListener("mousemove", handleDrag);
-      document.removeEventListener("mouseup", handleStopDrag);
-    };
-  }, [isResizing, handleDrag, handleStopDrag]);
+        if (isSmallerThanMinimum) {
+          const isSmallerThanCollapsePoint = width < minWidth / 2;
 
-  return { isAnimating, isSmallerThanMinimum, isResizing, handleStartDrag };
-};
+          if (isSmallerThanCollapsePoint) {
+            setAnimating(false);
+            setCollapsing(true);
+            ui.collapseSidebar();
+          } else {
+            setWidth(minWidth);
+            setAnimating(true);
+          }
+        } else {
+          setWidth(width);
+        }
+      },
+      [ui, isSmallerThanMinimum, minWidth, width, setWidth]
+    );
 
-function Sidebar({ location, children }: Props) {
-  const theme = useTheme();
-  const { t } = useTranslation();
-  const { ui } = useStores();
-  const previousLocation = usePrevious(location);
+    const handleMouseDown = React.useCallback(
+      (event: MouseEvent) => {
+        setOffset(event.pageX - width);
+        setResizing(true);
+        setAnimating(false);
+      },
+      [width]
+    );
 
-  const width = ui.sidebarWidth;
-  const maxWidth = theme.sidebarMaxWidth;
-  const minWidth = theme.sidebarMinWidth + 16; // padding
-  const collapsed = ui.editMode || ui.sidebarCollapsed;
+    React.useEffect(() => {
+      if (isAnimating) {
+        setTimeout(() => setAnimating(false), ANIMATION_MS);
+      }
+    }, [isAnimating]);
 
-  const {
-    isAnimating,
-    isSmallerThanMinimum,
-    isResizing,
-    handleStartDrag,
-  } = useResize({
-    width,
-    minWidth,
-    maxWidth,
-    setWidth: ui.setSidebarWidth,
-  });
+    React.useEffect(() => {
+      if (isCollapsing) {
+        setTimeout(() => {
+          setWidth(minWidth);
+          setCollapsing(false);
+        }, ANIMATION_MS);
+      }
+    }, [setWidth, minWidth, isCollapsing]);
 
-  const handleReset = React.useCallback(() => {
-    ui.setSidebarWidth(theme.sidebarWidth);
-  }, [ui, theme.sidebarWidth]);
+    React.useEffect(() => {
+      if (isResizing) {
+        document.addEventListener("mousemove", handleDrag);
+        document.addEventListener("mouseup", handleStopDrag);
+      }
 
-  React.useEffect(() => {
-    ui.setSidebarResizing(isResizing);
-  }, [ui, isResizing]);
+      return () => {
+        document.removeEventListener("mousemove", handleDrag);
+        document.removeEventListener("mouseup", handleStopDrag);
+      };
+    }, [isResizing, handleDrag, handleStopDrag]);
 
-  React.useEffect(() => {
-    if (location !== previousLocation) {
-      ui.hideMobileSidebar();
-    }
-  }, [ui, location, previousLocation]);
+    const handleReset = React.useCallback(() => {
+      ui.setSidebarWidth(theme.sidebarWidth);
+    }, [ui, theme.sidebarWidth]);
 
-  const style = React.useMemo(
-    () => ({
-      width: `${width}px`,
-      left:
-        collapsed && !ui.mobileSidebarVisible
-          ? `${-width + theme.sidebarCollapsedWidth}px`
-          : 0,
-    }),
-    [width, collapsed, theme.sidebarCollapsedWidth, ui.mobileSidebarVisible]
-  );
+    React.useEffect(() => {
+      ui.setSidebarResizing(isResizing);
+    }, [ui, isResizing]);
 
-  const content = (
-    <Container
-      style={style}
-      $sidebarWidth={ui.sidebarWidth}
-      $isAnimating={isAnimating}
-      $isSmallerThanMinimum={isSmallerThanMinimum}
-      $mobileSidebarVisible={ui.mobileSidebarVisible}
-      $collapsed={collapsed}
-      column
-    >
-      {!isResizing && (
-        <CollapseToggle
-          collapsed={ui.sidebarCollapsed}
-          onClick={ui.toggleCollapsedSidebar}
-        />
-      )}
-      {ui.mobileSidebarVisible && (
-        <Portal>
-          <Fade>
-            <Background onClick={ui.toggleMobileSidebar} />
-          </Fade>
-        </Portal>
-      )}
+    React.useEffect(() => {
+      if (location !== previousLocation) {
+        isFirstRender = false;
+        ui.hideMobileSidebar();
+      }
+    }, [ui, location, previousLocation]);
 
-      {children}
-      {!ui.sidebarCollapsed && (
+    const style = React.useMemo(
+      () => ({
+        width: `${width}px`,
+      }),
+      [width]
+    );
+
+    const toggleStyle = React.useMemo(
+      () => ({
+        right: "auto",
+        marginLeft: `${collapsed ? theme.sidebarCollapsedWidth : width}px`,
+      }),
+      [width, theme.sidebarCollapsedWidth, collapsed]
+    );
+
+    const content = (
+      <>
+        {ui.mobileSidebarVisible && (
+          <Portal>
+            <Backdrop onClick={ui.toggleMobileSidebar} />
+          </Portal>
+        )}
+        {children}
         <ResizeBorder
-          onMouseDown={handleStartDrag}
-          onDoubleClick={handleReset}
+          onMouseDown={handleMouseDown}
+          onDoubleClick={ui.sidebarCollapsed ? undefined : handleReset}
           $isResizing={isResizing}
+        />
+        {ui.sidebarCollapsed && !ui.isEditing && (
+          <Toggle
+            onClick={ui.toggleCollapsedSidebar}
+            direction={"right"}
+            aria-label={t("Expand")}
+          />
+        )}
+      </>
+    );
+
+    return (
+      <>
+        <Container
+          ref={ref}
+          style={style}
+          $sidebarWidth={ui.sidebarWidth}
+          $isCollapsing={isCollapsing}
+          $isAnimating={isAnimating}
+          $isSmallerThanMinimum={isSmallerThanMinimum}
+          $mobileSidebarVisible={ui.mobileSidebarVisible}
+          $collapsed={collapsed}
+          column
         >
-          <ResizeHandle aria-label={t("Resize sidebar")} />
-        </ResizeBorder>
-      )}
-    </Container>
-  );
-
-  // Fade in the sidebar on first render after page load
-  if (firstRender) {
-    firstRender = false;
-    return <Fade>{content}</Fade>;
+          {isFirstRender ? <Fade>{content}</Fade> : content}
+        </Container>
+        {!ui.isEditing && (
+          <Toggle
+            style={toggleStyle}
+            onClick={ui.toggleCollapsedSidebar}
+            direction={ui.sidebarCollapsed ? "right" : "left"}
+            aria-label={ui.sidebarCollapsed ? t("Expand") : t("Collapse")}
+          />
+        )}
+      </>
+    );
   }
+);
 
-  return content;
-}
-
-const Background = styled.a`
+const Backdrop = styled.a`
+  animation: ${fadeIn} 250ms ease-in-out;
   position: fixed;
   top: 0;
   left: 0;
@@ -186,7 +211,7 @@ const Background = styled.a`
   right: 0;
   cursor: default;
   z-index: ${(props) => props.theme.depths.sidebar - 1};
-  background: rgba(0, 0, 0, 0.5);
+  background: ${(props) => props.theme.backdrop};
 `;
 
 const Container = styled(Flex)`
@@ -195,29 +220,35 @@ const Container = styled(Flex)`
   bottom: 0;
   width: 100%;
   background: ${(props) => props.theme.sidebarBackground};
-  transition: box-shadow, 100ms, ease-in-out, margin-left 100ms ease-out,
-    left 100ms ease-out,
+  transition: box-shadow 100ms ease-in-out, transform 100ms ease-out,
     ${(props) => props.theme.backgroundTransition}
       ${(props) =>
-        props.$isAnimating ? `,width ${BOUNCE_ANIMATION_MS}ms ease-out` : ""};
-  margin-left: ${(props) => (props.$mobileSidebarVisible ? 0 : "-100%")};
+        props.$isAnimating ? `,width ${ANIMATION_MS}ms ease-out` : ""};
+  transform: translateX(
+    ${(props) => (props.$mobileSidebarVisible ? 0 : "-100%")}
+  );
   z-index: ${(props) => props.theme.depths.sidebar};
   max-width: 70%;
   min-width: 280px;
 
+  ${Positioner} {
+    display: none;
+  }
+
   @media print {
     display: none;
-    left: 0;
+    transform: none;
   }
 
   ${breakpoint("tablet")`
     margin: 0;
-    z-index: 3;
     min-width: 0;
+    transform: translateX(${(props) =>
+      props.$collapsed ? "calc(-100% + 16px)" : 0});
 
     &:hover,
     &:focus-within {
-      left: 0 !important;
+      transform: none;
       box-shadow: ${(props) =>
         props.$collapsed
           ? "rgba(0, 0, 0, 0.2) 1px 0 4px"
@@ -225,11 +256,11 @@ const Container = styled(Flex)`
           ? "rgba(0, 0, 0, 0.1) inset -1px 0 2px"
           : "none"};
 
-      & ${CollapseButton} {
-        opacity: .75;
+      ${Positioner} {
+        display: block;
       }
 
-      & ${CollapseButton}:hover {
+      ${ToggleButton} {
         opacity: 1;
       }
     }
@@ -241,4 +272,4 @@ const Container = styled(Flex)`
   `};
 `;
 
-export default withRouter(observer(Sidebar));
+export default observer(Sidebar);

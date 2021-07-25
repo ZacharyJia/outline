@@ -1,6 +1,5 @@
 // @flow
-import addDays from "date-fns/add_days";
-import differenceInDays from "date-fns/difference_in_days";
+import { addDays, differenceInDays } from "date-fns";
 import invariant from "invariant";
 import { action, computed, observable, set } from "mobx";
 import parseTitle from "shared/utils/parseTitle";
@@ -24,7 +23,7 @@ export default class Document extends BaseModel {
   @observable lastViewedAt: ?string;
   store: DocumentsStore;
 
-  collaborators: User[];
+  collaboratorIds: string[];
   collectionId: string;
   createdAt: string;
   createdBy: User;
@@ -57,6 +56,26 @@ export default class Document extends BaseModel {
   get emoji() {
     const { emoji } = parseTitle(this.title);
     return emoji;
+  }
+
+  /**
+   * Best-guess the text direction of the document based on the language the
+   * title is written in. Note: wrapping as a computed getter means that it will
+   * only be called directly when the title changes.
+   */
+  @computed
+  get dir(): "rtl" | "ltr" {
+    const element = document.createElement("p");
+    element.innerHTML = this.title;
+    element.style.visibility = "hidden";
+    element.dir = "auto";
+
+    // element must appear in body for direction to be computed
+    document.body?.appendChild(element);
+
+    const direction = window.getComputedStyle(element).direction;
+    document.body?.removeChild(element);
+    return direction;
   }
 
   @computed
@@ -130,12 +149,6 @@ export default class Document extends BaseModel {
   get isFromTemplate(): boolean {
     return !!this.templateId;
   }
-
-  @computed
-  get placeholder(): ?string {
-    return this.isTemplate ? "Start your template…" : "Start with a title…";
-  }
-
   @action
   share = async () => {
     return this.store.rootStore.shares.create({ documentId: this.id });
