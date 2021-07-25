@@ -1,6 +1,6 @@
 // @flow
 import passport from "@outlinewiki/koa-passport";
-// import fetch from "fetch-with-proxy";
+import fetch from "fetch-with-proxy";
 import Router from "koa-router";
 import { Strategy as GiteaStrategy } from "passport-gitea";
 import accountProvisioner from "../../commands/accountProvisioner";

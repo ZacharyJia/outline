@@ -182,6 +182,7 @@ export class Mailer {
           "SMTP_TLS_CIPHERS" in process.env
             ? { ciphers: process.env.SMTP_TLS_CIPHERS }
             : undefined,
+        ignoreTLS: process.env.SMTP_IGNORE_TLS === "true"
       };
 
       if (process.env.SMTP_USERNAME) {

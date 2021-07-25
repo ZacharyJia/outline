@@ -13,6 +13,7 @@ export async function generateAvatarUrl({
   domain?: string,
   name?: string,
 }) {
+  return "/email/header-logo.png";
   // attempt to get logo from Clearbit API. If one doesn't exist then
   // fall back to using tiley to generate a placeholder logo
   const hash = crypto.createHash("sha256");
